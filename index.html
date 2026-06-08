@@ -215,12 +215,13 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
 .dsection{position:relative;min-width:0;display:flex;flex-direction:column;gap:18px}
 .dsection.dragging{opacity:.45}
 .dsection.dragover{outline:2px dashed var(--accent);outline-offset:4px;border-radius:14px}
-.dgrip{position:absolute;top:-11px;left:50%;transform:translateX(-50%);z-index:6;width:40px;height:20px;
-  display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid var(--line2);
-  border-radius:7px;color:var(--muted);cursor:grab;opacity:0;transition:.12s;box-shadow:var(--shadow)}
-.dsection:hover .dgrip{opacity:1}
-.dgrip:active{cursor:grabbing}
-.dgrip svg{width:16px;height:16px}
+.dtools{position:absolute;top:-12px;left:50%;transform:translateX(-50%);z-index:6;display:flex;gap:5px;opacity:0;transition:.12s}
+.dsection:hover .dtools{opacity:1}
+.dtool{width:28px;height:22px;display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid var(--line2);border-radius:7px;color:var(--muted);box-shadow:var(--shadow);cursor:pointer;padding:0}
+.dtool:hover{color:var(--ink);background:#f4f4f3}
+.dgrip{cursor:grab}.dgrip:active{cursor:grabbing}
+.dtool svg{width:15px;height:15px}
+.dsection.full{grid-column:1 / -1}
 
 /* ---- boxed task / mission items ---- */
 .tbox{display:flex;align-items:center;gap:11px;padding:12px 13px;margin:8px 6px;border:1px solid var(--line2);border-radius:11px;background:#fff;transition:.12s}
@@ -328,7 +329,8 @@ const I = {
   trash:'<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
   move:'<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
   flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V4"/>',
-  grip:'<path d="M5 9h14M5 15h14"/>'
+  grip:'<path d="M5 9h14M5 15h14"/>',
+  wide:'<path d="M21 12H3M7 8l-4 4 4 4M17 8l4 4-4 4"/>'
 };
 function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
@@ -451,12 +453,19 @@ async function renderDashboard(v){
   const sugg = isToday(date)?await missionSuggestions(M):null;
 
   const monthCard = await analyticsCard();
-  const grip='<span class="dgrip" title="Drag to reorder">'+svg(I.grip)+'</span>';
+  const full=getDashFull();
+  function tools(key){
+    return '<div class="dtools">'
+      +'<span class="dtool dgrip" title="Drag to reorder">'+svg(I.grip)+'</span>'
+      +'<button class="dtool dwide" title="Toggle full width" onclick="toggleWide(\''+key+'\')">'+svg(I.wide)+'</button>'
+    +'</div>';
+  }
+  function sec(key,inner){return '<div class="dsection'+(full.includes(key)?' full':'')+'" data-key="'+key+'">'+tools(key)+inner+'</div>';}
   const sections={
-    month:'<div class="dsection" data-key="month">'+grip+monthCard+'</div>',
-    todo:'<div class="dsection" data-key="todo">'+grip+todoCard(T)+(sugg?suggCard(sugg):'')+'</div>',
-    mission:'<div class="dsection" data-key="mission">'+grip+missionCard(M)+'</div>',
-    vision:'<div class="dsection" data-key="vision">'+grip+visionCard(V)+'</div>'
+    month:sec('month',monthCard),
+    todo:sec('todo',todoCard(T)+(sugg?suggCard(sugg):'')),
+    mission:sec('mission',missionCard(M)),
+    vision:sec('vision',visionCard(V))
   };
   v.innerHTML =
     (nudges.length?'<div class="nudges">'+nudges.map(nudgeHtml).join('')+'</div>':'')
@@ -691,6 +700,15 @@ async function refreshMissions(){
 const DASH_KEYS=['month','todo','mission','vision'];
 function getDashOrder(){try{const a=JSON.parse(localStorage.getItem('dc_dash_order')||'[]').filter(k=>DASH_KEYS.includes(k));DASH_KEYS.forEach(k=>{if(!a.includes(k))a.push(k);});return a;}catch(e){return DASH_KEYS.slice();}}
 function saveDashOrder(a){localStorage.setItem('dc_dash_order',JSON.stringify(a));}
+function getDashFull(){try{return JSON.parse(localStorage.getItem('dc_dash_full')||'["month","vision"]').filter(k=>DASH_KEYS.includes(k));}catch(e){return ['month','vision'];}}
+function saveDashFull(a){localStorage.setItem('dc_dash_full',JSON.stringify(a));}
+function toggleWide(key){
+  const set=getDashFull();const i=set.indexOf(key);
+  if(i>=0)set.splice(i,1);else set.push(key);
+  saveDashFull(set);
+  const s=document.querySelector('.dsection[data-key="'+key+'"]');
+  if(s)s.classList.toggle('full',set.includes(key));
+}
 function initDashGrid(){
   const grid=el('dashgrid');if(!grid||grid._wired)return;grid._wired=true;
   let dragKey=null;
@@ -1018,7 +1036,7 @@ checkGate();
 
 // expose for inline handlers
 Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,addRoutine,addMission,quickAddMission,
-  toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,addBlock,delBlock,autoSchedule,
+  toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   addWorkout,addFood,tryUnlock,lock});
 </script>
 <script>
