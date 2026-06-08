@@ -209,6 +209,19 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
 .dash-bottom{display:grid;grid-template-columns:1fr;gap:18px;margin-top:18px}
 @media(max-width:900px){.dash-top{grid-template-columns:1fr}}
 
+/* ---- reorderable dashboard grid ---- */
+.dashgrid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.dashgrid{grid-template-columns:1fr}}
+.dsection{position:relative;min-width:0;display:flex;flex-direction:column;gap:18px}
+.dsection.dragging{opacity:.45}
+.dsection.dragover{outline:2px dashed var(--accent);outline-offset:4px;border-radius:14px}
+.dgrip{position:absolute;top:-11px;left:50%;transform:translateX(-50%);z-index:6;width:40px;height:20px;
+  display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid var(--line2);
+  border-radius:7px;color:var(--muted);cursor:grab;opacity:0;transition:.12s;box-shadow:var(--shadow)}
+.dsection:hover .dgrip{opacity:1}
+.dgrip:active{cursor:grabbing}
+.dgrip svg{width:16px;height:16px}
+
 /* ---- boxed task / mission items ---- */
 .tbox{display:flex;align-items:center;gap:11px;padding:12px 13px;margin:8px 6px;border:1px solid var(--line2);border-radius:11px;background:#fff;transition:.12s}
 .tbox:hover{border-color:#d6d6d3;box-shadow:var(--shadow)}
@@ -314,7 +327,8 @@ const I = {
   x:'<path d="M6 6l12 12M18 6L6 18"/>',
   trash:'<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
   move:'<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
-  flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V4"/>'
+  flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V4"/>',
+  grip:'<path d="M5 9h14M5 15h14"/>'
 };
 function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
@@ -437,20 +451,18 @@ async function renderDashboard(v){
   const sugg = isToday(date)?await missionSuggestions(M):null;
 
   const monthCard = await analyticsCard();
+  const grip='<span class="dgrip" title="Drag to reorder">'+svg(I.grip)+'</span>';
+  const sections={
+    month:'<div class="dsection" data-key="month">'+grip+monthCard+'</div>',
+    todo:'<div class="dsection" data-key="todo">'+grip+todoCard(T)+(sugg?suggCard(sugg):'')+'</div>',
+    mission:'<div class="dsection" data-key="mission">'+grip+missionCard(M)+'</div>',
+    vision:'<div class="dsection" data-key="vision">'+grip+visionCard(V)+'</div>'
+  };
   v.innerHTML =
     (nudges.length?'<div class="nudges">'+nudges.map(nudgeHtml).join('')+'</div>':'')
-    + '<div style="margin-bottom:18px">'+monthCard+'</div>'
-    + '<div class="dash-top">'
-      + '<div style="display:flex;flex-direction:column;gap:18px">'
-        + todoCard(T)
-        + (sugg?suggCard(sugg):'')
-      + '</div>'
-      + missionCard(M)
-    + '</div>'
-    + '<div class="dash-bottom">'
-      + visionCard(V)
-    + '</div>';
+    + '<div class="dashgrid" id="dashgrid">'+getDashOrder().map(k=>sections[k]).join('')+'</div>';
   initVisionBoard();
+  initDashGrid();
 }
 
 // ---- To-Do (recurring) ----
@@ -459,7 +471,7 @@ function todoCard(T){
   const rows = T.length? T.map(t=>{
     const d=t.status==='done';
     return '<div class="tbox '+(d?'done':'')+'">'
-      +'<div class="chk '+(d?'done':'')+'" onclick="toggleTask(\''+t.id+'\',\''+t.status+'\')">'+svg(I.check)+'</div>'
+      +'<div class="chk '+(d?'done':'')+'" onclick="toggleTask(this,\''+t.id+'\',\''+t.status+'\')">'+svg(I.check)+'</div>'
       +'<div class="rt '+(d?'done':'')+'"><div class="t">'+esc(t.title)+'</div></div>'
       +'<span class="tag '+t.category+'">'+titleCase(t.category)+'</span>'
       +'<div class="row-acts">'
@@ -467,7 +479,7 @@ function todoCard(T){
         +'<button class="btn ghost sm" title="Delete" onclick="deleteTask(\''+t.id+'\',\''+(t.routine_id||'')+'\')">'+svg(I.trash,'')+'</button>'
       +'</div></div>';
   }).join('') : '<div class="empty">No routines yet. Add one below and it will appear here each day.</div>';
-  return '<div class="card">'
+  return '<div class="card" id="card-todo">'
     +'<div class="card-h">'+svg(I.check,'ic')+'<h2>To-Do &middot; Daily Routines</h2><span class="count">'+done+'/'+T.length+'</span></div>'
     +'<div class="card-b">'+rows
       +'<div class="addbar">'
@@ -489,11 +501,11 @@ function missionCard(M){
   function mrow(m,isNoise){
     const d=m.status==='done';
     return '<div class="tbox '+(isNoise?'noise':'')+' '+(d?'done':'')+'">'
-      +'<div class="chk '+(d?'done':'')+'" onclick="toggleMission(\''+m.id+'\',\''+m.status+'\')">'+svg(I.check)+'</div>'
+      +'<div class="chk '+(d?'done':'')+'" onclick="toggleMission(this,\''+m.id+'\',\''+m.status+'\')">'+svg(I.check)+'</div>'
       +'<div class="rt '+(d?'done':'')+'"><div class="t">'+esc(m.title)+'</div></div>'
       +'<div class="row-acts">'
         +'<button class="btn ghost sm" title="Move to tomorrow" onclick="moveMission(\''+m.id+'\')">'+svg(I.move,'')+'</button>'
-        +'<button class="btn ghost sm" onclick="delRow(\'dc_missions\',\''+m.id+'\')">'+svg(I.trash,'')+'</button>'
+        +'<button class="btn ghost sm" title="Delete" onclick="deleteMission(\''+m.id+'\')">'+svg(I.trash,'')+'</button>'
       +'</div></div>';
   }
   let body='<div class="sn-head"><span class="dot s"></span><b>Signals</b><span class="hint">move the needle</span></div>';
@@ -501,7 +513,7 @@ function missionCard(M){
   body += '<div class="sn-head" style="margin-top:10px"><span class="dot n"></span><b>Noise</b><span class="hint">necessary, low-impact</span></div>';
   if(noise.length && !signalsDone && signals.length) body+='<div class="locked-note">Knock out your signals first. Noise can wait.</div>';
   body += noise.length?noise.map(m=>mrow(m,true)).join(''):'<div class="empty" style="padding:10px">Nothing here.</div>';
-  return '<div class="card">'
+  return '<div class="card" id="card-mission">'
     +'<div class="card-h">'+svg(I.target,'ic')+'<h2>Mission &middot; Signal vs Noise</h2></div>'
     +'<div class="card-b">'+body
       +'<div class="addbar">'
@@ -611,46 +623,91 @@ async function addRoutine(){
   const t=el('ndTask').value.trim();if(!t)return;
   const cat=el('ndCat').value,rec=el('ndRec').value;
   await sb.from('dc_routines').insert({title:t,category:cat,recurrence:rec});
-  el('ndTask').value='';toast('Routine added -- it will auto-populate '+(rec==='daily'?'every day':'on matching days'));
-  navigate('dashboard');
+  await ensureTasksFor(state.date);
+  toast('Routine added');
+  await refreshTodo();
 }
-async function toggleTask(id,status){
-  const done=status==='done';
-  await sb.from('dc_tasks').update({status:done?'pending':'done',completed_at:done?null:new Date().toISOString()}).eq('id',id);
-  navigate('dashboard');
+async function toggleTask(node,id,status){
+  const nowDone=status!=='done';const box=node.closest('.tbox');
+  node.classList.toggle('done',nowDone);box.classList.toggle('done',nowDone);
+  const rt=box.querySelector('.rt');if(rt)rt.classList.toggle('done',nowDone);
+  node.setAttribute('onclick',"toggleTask(this,'"+id+"','"+(nowDone?'done':'pending')+"')");
+  updateCount('card-todo');
+  await sb.from('dc_tasks').update({status:nowDone?'done':'pending',completed_at:nowDone?new Date().toISOString():null}).eq('id',id);
 }
 async function moveTask(id){
   await sb.from('dc_tasks').update({scheduled_date:addDays(state.date,1),status:'pending'}).eq('id',id);
-  toast('Moved to '+shortDate(addDays(state.date,1)));navigate('dashboard');
+  toast('Moved to tomorrow');await refreshTodo();
 }
 async function deleteTask(id,routineId){
-  // Routine-backed tasks get regenerated each day by ensureTasksFor, so to truly
-  // delete one we remove the underlying routine too (then it stops recurring).
+  // Routine-backed tasks regenerate each day, so deleting one removes the routine too.
   if(routineId){
     if(!confirm('Delete this routine? It will stop appearing each day.'))return;
     await sb.from('dc_routines').delete().eq('id',routineId);
   }
   await sb.from('dc_tasks').delete().eq('id',id);
   toast(routineId?'Routine deleted':'Task deleted');
-  navigate('dashboard');
+  await refreshTodo();
 }
 async function addMission(){
   const t=el('nmTitle').value.trim();if(!t)return;
   await sb.from('dc_missions').insert({title:t,category:'general',priority:el('nmPri').value,scheduled_date:state.date});
-  el('nmTitle').value='';navigate('dashboard');
+  await refreshMissions();
 }
 async function quickAddMission(cat){
   await sb.from('dc_missions').insert({title:titleCase(cat),category:cat,priority:'signal',scheduled_date:state.date});
-  toast('Added to missions');navigate('dashboard');
+  toast('Added to missions');await refreshMissions();
 }
-async function toggleMission(id,status){
-  const done=status==='done';
-  await sb.from('dc_missions').update({status:done?'pending':'done',completed_at:done?null:new Date().toISOString()}).eq('id',id);
-  navigate('dashboard');
+async function toggleMission(node,id,status){
+  const nowDone=status!=='done';const box=node.closest('.tbox');
+  node.classList.toggle('done',nowDone);box.classList.toggle('done',nowDone);
+  const rt=box.querySelector('.rt');if(rt)rt.classList.toggle('done',nowDone);
+  node.setAttribute('onclick',"toggleMission(this,'"+id+"','"+(nowDone?'done':'pending')+"')");
+  await sb.from('dc_missions').update({status:nowDone?'done':'pending',completed_at:nowDone?new Date().toISOString():null}).eq('id',id);
 }
 async function moveMission(id){
   await sb.from('dc_missions').update({scheduled_date:addDays(state.date,1),status:'pending'}).eq('id',id);
-  toast('Moved to tomorrow');navigate('dashboard');
+  toast('Moved to tomorrow');await refreshMissions();
+}
+async function deleteMission(id){
+  await sb.from('dc_missions').delete().eq('id',id);
+  await refreshMissions();
+}
+function updateCount(cardId){
+  const c=el(cardId);if(!c)return;const cnt=c.querySelector('.count');
+  if(cnt)cnt.textContent=c.querySelectorAll('.tbox.done').length+'/'+c.querySelectorAll('.tbox').length;
+}
+async function refreshTodo(){
+  const c=el('card-todo');if(!c)return;
+  const {data}=await sb.from('dc_tasks').select('*').eq('scheduled_date',state.date).order('scheduled_time',{nullsFirst:false}).order('sort_order');
+  c.outerHTML=todoCard(data||[]);
+}
+async function refreshMissions(){
+  const c=el('card-mission');if(!c)return;
+  const {data}=await sb.from('dc_missions').select('*').eq('scheduled_date',state.date).order('sort_order').order('created_at');
+  c.outerHTML=missionCard(data||[]);
+}
+// ---- dashboard section ordering (drag to reorder, persisted per device) ----
+const DASH_KEYS=['month','todo','mission','vision'];
+function getDashOrder(){try{const a=JSON.parse(localStorage.getItem('dc_dash_order')||'[]').filter(k=>DASH_KEYS.includes(k));DASH_KEYS.forEach(k=>{if(!a.includes(k))a.push(k);});return a;}catch(e){return DASH_KEYS.slice();}}
+function saveDashOrder(a){localStorage.setItem('dc_dash_order',JSON.stringify(a));}
+function initDashGrid(){
+  const grid=el('dashgrid');if(!grid||grid._wired)return;grid._wired=true;
+  let dragKey=null;
+  grid.addEventListener('mousedown',e=>{const g=e.target.closest('.dgrip');if(!g)return;const s=g.closest('.dsection');if(s)s.setAttribute('draggable','true');});
+  grid.addEventListener('mouseup',()=>{[...grid.children].forEach(c=>c.setAttribute('draggable','false'));});
+  grid.addEventListener('dragstart',e=>{const s=e.target.closest('.dsection');if(!s||s.getAttribute('draggable')!=='true'){e.preventDefault();return;}dragKey=s.dataset.key;s.classList.add('dragging');try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',dragKey);}catch(_){}});
+  grid.addEventListener('dragover',e=>{if(!dragKey)return;e.preventDefault();const s=e.target.closest('.dsection');[...grid.children].forEach(c=>c.classList.toggle('dragover',c===s&&c.dataset.key!==dragKey));});
+  grid.addEventListener('drop',e=>{
+    if(!dragKey)return;e.preventDefault();
+    const target=e.target.closest('.dsection');const dragged=grid.querySelector('.dsection[data-key="'+dragKey+'"]');
+    if(target&&dragged&&target!==dragged){const items=[...grid.children];
+      if(items.indexOf(dragged)<items.indexOf(target))target.after(dragged);else target.before(dragged);
+      saveDashOrder([...grid.children].map(c=>c.dataset.key));}
+    finishDrag();
+  });
+  grid.addEventListener('dragend',finishDrag);
+  function finishDrag(){[...grid.children].forEach(c=>{c.classList.remove('dragover','dragging');c.setAttribute('draggable','false');});dragKey=null;}
 }
 async function addGoal(){
   const t=el('ngGoal').value.trim();if(!t)return;
@@ -961,7 +1018,7 @@ checkGate();
 
 // expose for inline handlers
 Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,addRoutine,addMission,quickAddMission,
-  toggleMission,moveMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,addBlock,delBlock,autoSchedule,
+  toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,addBlock,delBlock,autoSchedule,
   addWorkout,addFood,tryUnlock,lock});
 </script>
 <script>
