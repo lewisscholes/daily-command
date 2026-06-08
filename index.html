@@ -179,6 +179,51 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#37352f;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:.2s;z-index:300}
 #toast.show{opacity:1}
 .hide{display:none!important}
+
+/* ---- dashboard layout ---- */
+.dash-top{display:grid;grid-template-columns:minmax(0,0.82fr) minmax(0,1.18fr);gap:18px;align-items:start}
+.dash-bottom{display:grid;grid-template-columns:1fr;gap:18px;margin-top:18px}
+@media(max-width:900px){.dash-top{grid-template-columns:1fr}}
+
+/* ---- boxed task / mission items ---- */
+.tbox{display:flex;align-items:center;gap:11px;padding:12px 13px;margin:8px 6px;border:1px solid var(--line2);border-radius:11px;background:#fff;transition:.12s}
+.tbox:hover{border-color:#d6d6d3;box-shadow:var(--shadow)}
+.tbox:hover .row-acts{opacity:1}
+.tbox.noise{background:#fafafa}
+.tbox.done{background:#fbfdfb;border-color:#e3efe8}
+.tbox .rt .t{font-weight:500}
+
+/* ---- add bar (full-width button) ---- */
+.addbar{display:flex;flex-direction:column;gap:8px;padding:12px 6px 4px;border-top:1px solid var(--line);margin-top:8px}
+.addbar .inrow{display:flex;gap:8px}
+.addbar input,.addbar select{border:1px solid var(--line2);border-radius:9px;padding:10px 12px;background:#fff;min-width:0}
+.addbar input.grow,.addbar select.grow{flex:1}
+.btn.full{width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:11px;font-size:14px}
+
+/* ---- responsive splits (time / food) ---- */
+.cal-wrap{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
+.food-wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.cal-wrap,.food-wrap{grid-template-columns:1fr}}
+
+.daynav button{display:flex;align-items:center;justify-content:center}
+
+/* ---- mobile ---- */
+@media(max-width:760px){
+  #app{flex-direction:column;height:auto;min-height:100vh;overflow:visible}
+  .sidebar{width:100%;flex:0 0 auto;border-right:none;border-bottom:1px solid var(--line);padding:12px 12px 10px}
+  .brand{padding:4px 6px 10px}
+  .sidebar .nav{flex-direction:row;flex-wrap:wrap}
+  .nav .label{display:none}
+  .nav button{width:auto;padding:8px 12px}
+  .side-foot{display:none}
+  .main{overflow:visible}
+  .topbar{padding:12px 16px}
+  .topbar h1{font-size:18px}
+  .wrap{padding:16px 14px 56px}
+  .cal .hlabel{flex:0 0 50px}
+  .stat .n{font-size:24px}
+  .row-acts{opacity:1}
+}
 </style>
 </head>
 <body>
@@ -247,7 +292,7 @@ const I = {
   move:'<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
   flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V4"/>'
 };
-function svg(p,cls){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
+function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
 // ===================== STATE =====================
 const state = { view:'dashboard', date:todayStr(), settings:null };
@@ -309,10 +354,11 @@ function buildNav(){
 function setActive(){[...document.querySelectorAll('.nav button')].forEach(b=>b.classList.toggle('active',b.dataset.k===state.view));}
 function renderDayNav(){
   const today=isToday(state.date);
+  const L='<path d="M15 18l-6-6 6-6"/>';const R='<path d="M9 18l6-6-6-6"/>';
   el('daynav').innerHTML =
-    '<button onclick="shiftDay(-1)">'+svg(I.arrow,'')+'</button>'.replace('class=""','style="transform:rotate(180deg)"')
+    '<button onclick="shiftDay(-1)">'+svg(L)+'</button>'
     +'<button class="today-pill" onclick="goToday()">'+(today?'Today':shortDate(state.date))+'</button>'
-    +'<button onclick="shiftDay(1)">'+svg(I.arrow)+'</button>';
+    +'<button onclick="shiftDay(1)">'+svg(R)+'</button>';
 }
 function shiftDay(n){state.date=addDays(state.date,n);navigate(state.view);}
 function goToday(){state.date=todayStr();navigate(state.view);}
@@ -357,30 +403,25 @@ function isDue(r,d){
 async function renderDashboard(v){
   await ensureTasksFor(state.date);
   const date=state.date;
-  const [tasks,missions,goals,vision] = await Promise.all([
+  const [tasks,missions,vision] = await Promise.all([
     sb.from('dc_tasks').select('*').eq('scheduled_date',date).order('scheduled_time',{nullsFirst:false}).order('sort_order'),
     sb.from('dc_missions').select('*').eq('scheduled_date',date).order('sort_order').order('created_at'),
-    sb.from('dc_goals').select('*').eq('goal_date',date).order('sort_order').order('created_at'),
     sb.from('dc_vision').select('*').order('sort_order').order('created_at')
   ]);
-  const T=tasks.data||[],M=missions.data||[],G=goals.data||[],V=vision.data||[];
+  const T=tasks.data||[],M=missions.data||[],V=vision.data||[];
   const nudges = await computeNudges(T,M);
   const sugg = isToday(date)?await missionSuggestions(M):null;
 
   v.innerHTML =
     (nudges.length?'<div class="nudges">'+nudges.map(nudgeHtml).join('')+'</div>':'')
-    + '<div class="grid cols-2">'
+    + '<div class="dash-top">'
       + '<div style="display:flex;flex-direction:column;gap:18px">'
         + todoCard(T)
         + (sugg?suggCard(sugg):'')
       + '</div>'
-      + '<div style="display:flex;flex-direction:column;gap:18px">'
-        + missionCard(M)
-        + goalsCard(G)
-      + '</div>'
+      + missionCard(M)
     + '</div>'
-    + '<div style="height:18px"></div>'
-    + '<div class="grid cols-2">'
+    + '<div class="dash-bottom">'
       + visionCard(V)
       + await analyticsCard()
     + '</div>';
@@ -391,24 +432,25 @@ function todoCard(T){
   const done=T.filter(t=>t.status==='done').length;
   const rows = T.length? T.map(t=>{
     const d=t.status==='done';
-    return '<div class="row">'
+    return '<div class="tbox '+(d?'done':'')+'">'
       +'<div class="chk '+(d?'done':'')+'" onclick="toggleTask(\''+t.id+'\',\''+t.status+'\')">'+svg(I.check)+'</div>'
-      +'<div class="rt '+(d?'done':'')+'"><div class="t">'+esc(t.title)+'</div>'
-      +'<div class="m"><span class="tag '+t.category+'">'+titleCase(t.category)+'</span>'+(t.scheduled_time?'<span>'+svg(I.clock,'')+' '+fmtTime(t.scheduled_time)+'</span>':'')+'</div></div>'
+      +'<div class="rt '+(d?'done':'')+'"><div class="t">'+esc(t.title)+'</div></div>'
+      +'<span class="tag '+t.category+'">'+titleCase(t.category)+'</span>'
       +'<div class="row-acts">'
         +'<button class="btn ghost sm" title="Move to tomorrow" onclick="moveTask(\''+t.id+'\')">'+svg(I.move,'')+'</button>'
         +'<button class="btn ghost sm" onclick="delRow(\'dc_tasks\',\''+t.id+'\')">'+svg(I.trash,'')+'</button>'
       +'</div></div>';
-  }).join('') : '<div class="empty">No recurring tasks yet. Add a routine below and it will auto-populate each day.</div>';
+  }).join('') : '<div class="empty">No routines yet. Add one below and it will appear here each day.</div>';
   return '<div class="card">'
     +'<div class="card-h">'+svg(I.check,'ic')+'<h2>To-Do &middot; Daily Routines</h2><span class="count">'+done+'/'+T.length+'</span></div>'
     +'<div class="card-b">'+rows
-      +'<div class="quick">'
-        +'<input class="grow" id="ndTask" placeholder="Add routine (e.g. Creatine, Date night)">'
-        +'<select id="ndCat"><option value="food">Food</option><option value="supplement">Supplement</option><option value="workout">Workout</option><option value="relationship">Relationship</option><option value="other">Other</option></select>'
-        +'<select id="ndRec"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekends">Weekends</option></select>'
-        +'<input id="ndTime" type="time" style="width:120px">'
-        +'<button class="btn primary" onclick="addRoutine()">'+svg(I.plus,'')+'</button>'
+      +'<div class="addbar">'
+        +'<input class="grow" id="ndTask" placeholder="Add a routine (e.g. Creatine)">'
+        +'<div class="inrow">'
+          +'<select id="ndCat" class="grow"><option value="food">Food</option><option value="supplement">Supplement</option><option value="workout">Workout</option><option value="relationship">Relationship</option><option value="other">Other</option></select>'
+          +'<select id="ndRec" class="grow"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekends">Weekends</option></select>'
+        +'</div>'
+        +'<button class="btn primary full" onclick="addRoutine()">'+svg(I.plus,'')+' Add Now</button>'
       +'</div>'
     +'</div></div>';
 }
@@ -420,10 +462,9 @@ function missionCard(M){
   const signalsDone=signals.length&&signals.every(m=>m.status==='done');
   function mrow(m,isNoise){
     const d=m.status==='done';
-    return '<div class="row '+(isNoise?'noise':'')+'">'
+    return '<div class="tbox '+(isNoise?'noise':'')+' '+(d?'done':'')+'">'
       +'<div class="chk '+(d?'done':'')+'" onclick="toggleMission(\''+m.id+'\',\''+m.status+'\')">'+svg(I.check)+'</div>'
-      +'<div class="rt '+(d?'done':'')+'"><div class="t">'+esc(m.title)+'</div>'
-      +'<div class="m"><span class="tag '+m.category+'">'+titleCase(m.category)+'</span>'+(m.estimated_minutes?'<span>'+m.estimated_minutes+'m</span>':'')+'</div></div>'
+      +'<div class="rt '+(d?'done':'')+'"><div class="t">'+esc(m.title)+'</div></div>'
       +'<div class="row-acts">'
         +'<button class="btn ghost sm" title="Move to tomorrow" onclick="moveMission(\''+m.id+'\')">'+svg(I.move,'')+'</button>'
         +'<button class="btn ghost sm" onclick="delRow(\'dc_missions\',\''+m.id+'\')">'+svg(I.trash,'')+'</button>'
@@ -431,18 +472,18 @@ function missionCard(M){
   }
   let body='<div class="sn-head"><span class="dot s"></span><b>Signals</b><span class="hint">move the needle</span></div>';
   body += signals.length?signals.map(m=>mrow(m,false)).join(''):'<div class="empty">No signals yet. What is the one thing that matters most today?</div>';
-  body += '<div class="sn-head" style="margin-top:8px"><span class="dot n"></span><b>Noise</b><span class="hint">necessary, low-impact</span></div>';
+  body += '<div class="sn-head" style="margin-top:10px"><span class="dot n"></span><b>Noise</b><span class="hint">necessary, low-impact</span></div>';
   if(noise.length && !signalsDone && signals.length) body+='<div class="locked-note">Knock out your signals first. Noise can wait.</div>';
   body += noise.length?noise.map(m=>mrow(m,true)).join(''):'<div class="empty" style="padding:10px">Nothing here.</div>';
   return '<div class="card">'
     +'<div class="card-h">'+svg(I.target,'ic')+'<h2>Mission &middot; Signal vs Noise</h2></div>'
     +'<div class="card-b">'+body
-      +'<div class="quick">'
-        +'<input class="grow" id="nmTitle" placeholder="Add work task...">'
-        +'<select id="nmCat"><option value="find_creators">Find creators</option><option value="product_testing">Product testing</option><option value="advertisements">Advertisements</option><option value="admin">Admin</option><option value="general">General</option></select>'
-        +'<select id="nmPri"><option value="signal">Signal</option><option value="noise">Noise</option></select>'
-        +'<input id="nmMin" type="number" placeholder="min" style="width:70px">'
-        +'<button class="btn primary" onclick="addMission()">'+svg(I.plus,'')+'</button>'
+      +'<div class="addbar">'
+        +'<input class="grow" id="nmTitle" placeholder="Add a work task...">'
+        +'<div class="inrow">'
+          +'<select id="nmPri" class="grow"><option value="signal">Signal -- high impact</option><option value="noise">Noise -- low impact</option></select>'
+        +'</div>'
+        +'<button class="btn primary full" onclick="addMission()">'+svg(I.plus,'')+' Let&#39;s Go</button>'
       +'</div>'
     +'</div></div>';
 }
@@ -526,8 +567,8 @@ async function analyticsCard(){
 // ===================== ACTIONS: tasks/missions/goals =====================
 async function addRoutine(){
   const t=el('ndTask').value.trim();if(!t)return;
-  const cat=el('ndCat').value,rec=el('ndRec').value,time=el('ndTime').value||null;
-  await sb.from('dc_routines').insert({title:t,category:cat,recurrence:rec,default_time:time});
+  const cat=el('ndCat').value,rec=el('ndRec').value;
+  await sb.from('dc_routines').insert({title:t,category:cat,recurrence:rec});
   el('ndTask').value='';toast('Routine added -- it will auto-populate '+(rec==='daily'?'every day':'on matching days'));
   navigate('dashboard');
 }
@@ -542,9 +583,8 @@ async function moveTask(id){
 }
 async function addMission(){
   const t=el('nmTitle').value.trim();if(!t)return;
-  await sb.from('dc_missions').insert({title:t,category:el('nmCat').value,priority:el('nmPri').value,
-    estimated_minutes:parseInt(el('nmMin').value)||null,scheduled_date:state.date});
-  el('nmTitle').value='';el('nmMin').value='';navigate('dashboard');
+  await sb.from('dc_missions').insert({title:t,category:'general',priority:el('nmPri').value,scheduled_date:state.date});
+  el('nmTitle').value='';navigate('dashboard');
 }
 async function quickAddMission(cat){
   await sb.from('dc_missions').insert({title:titleCase(cat),category:cat,priority:'signal',scheduled_date:state.date});
@@ -642,7 +682,7 @@ async function renderTime(v){
       +esc(b.title)+'<small>'+fmtTime(b.start_time)+' - '+fmtTime(b.end_time)+'</small></div>';
   }).join('');
   v.innerHTML =
-    '<div class="grid cols-2" style="grid-template-columns:1fr 320px;align-items:start">'
+    '<div class="cal-wrap">'
     +'<div class="cal"><div style="position:relative">'+hours
       +'<div class="layer" style="left:64px">'+blockEls+'</div>'
     +'</div></div>'
@@ -667,19 +707,25 @@ function workTimeTip(s,blocks){
     +'<div style="margin-top:8px"><b>Workout:</b> right after waking ('+fmtTime(woStart)+'-'+fmtTime(woEnd)+') -- it is done before the workday and frees your afternoon for signals.</div>'
     +'<div style="margin-top:6px"><b>Sleep:</b> aim for lights out by '+sleep+' to keep a full early block tomorrow.</div>'
     +'<div style="margin-top:6px"><b>Deep work:</b> stack your hardest signal in your first 2 work hours, before meetings and noise creep in.</div>'
-    +'<button class="btn sm" style="margin-top:10px" onclick="autoSchedule()">Auto-add workout + focus blocks</button>'
+    +'<button class="btn primary full" style="margin-top:12px" onclick="autoSchedule()">'+svg(I.spark,'')+' Auto-build my full day</button>'
+    +'<div style="margin-top:6px;font-size:11px;color:#8a8985">Adds workout, deep work, lunch, focus, wind-down and sleep at '+sleep+'.</div>'
     +'</div>';
 }
 function addMin(t,m){const x=hm(t)+m/60;const h=Math.floor(x);const mm=Math.round((x-h)*60);return String(h).padStart(2,'0')+':'+String(mm).padStart(2,'0');}
 async function autoSchedule(){
   const s=state.settings;const date=state.date;
-  const woS=s.wake_time,woE=addMin(s.wake_time,60);
-  const fS=addMin(s.wake_time,90),fE=addMin(s.wake_time,210);
-  await sb.from('dc_timeblocks').insert([
-    {title:'Workout',block_date:date,start_time:woS,end_time:woE,type:'workout'},
-    {title:'Deep work (top signal)',block_date:date,start_time:fS,end_time:fE,type:'focus'}
-  ]);
-  toast('Added workout + focus blocks');navigate('time');
+  const plan=[
+    {title:'Workout',start:s.wake_time,end:addMin(s.wake_time,60),type:'workout'},
+    {title:'Deep work (top signal)',start:addMin(s.wake_time,90),end:addMin(s.wake_time,210),type:'focus'},
+    {title:'Lunch',start:'12:30',end:'13:15',type:'meal'},
+    {title:'Focused work',start:'13:30',end:'15:30',type:'work'},
+    {title:'Admin / noise',start:'15:30',end:'16:30',type:'work'},
+    {title:'Wind down',start:addMin(s.sleep_time,-60),end:s.sleep_time,type:'personal'},
+    {title:'Sleep',start:s.sleep_time,end:addMin(s.sleep_time,30),type:'sleep'}
+  ];
+  const rows=plan.map(b=>({title:b.title,block_date:date,start_time:b.start,end_time:b.end,type:b.type}));
+  await sb.from('dc_timeblocks').insert(rows);
+  toast('Built your full day -- tweak any block as needed');navigate('time');
 }
 async function addBlock(){
   const t=el('tbTitle').value.trim();if(!t){toast('Add a title');return;}
@@ -736,7 +782,7 @@ async function renderFood(v){
       '<div class="row"><div class="rt"><div class="t">'+esc(x.name)+'</div><div class="m">'+x.calories+' kcal &middot; P'+x.protein+' C'+x.carbs+' F'+x.fat+'</div></div>'
       +'<button class="btn ghost sm" onclick="delRow(\'dc_food\',\''+x.id+'\')">'+svg(I.trash,'')+'</button></div>').join('');
   }).join('');
-  v.innerHTML='<div class="grid cols-2" style="grid-template-columns:340px 1fr;align-items:start">'
+  v.innerHTML='<div class="food-wrap">'
     +'<div class="card"><div class="card-h">'+svg(I.target,'ic')+'<h2>Today vs goals</h2></div><div class="card-b" style="padding:16px">'
       +'<div class="stat" style="padding:0 0 10px"><div class="n">'+cal+'</div><div class="l">of '+(s.cal_target)+' kcal</div></div>'
       +bar('Calories',cal,s.cal_target,'')+bar('Protein',pro,s.protein_target,'g')+bar('Carbs',carb,s.carbs_target,'g')+bar('Fat',fat,s.fat_target,'g')
