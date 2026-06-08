@@ -153,6 +153,11 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
 .vitem .vrz{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;
   background:linear-gradient(135deg,transparent 48%,var(--accent) 48%);border-radius:0 0 10px 0;opacity:0;transition:.12s;z-index:2}
 .vitem:hover .vrz{opacity:.95}
+.vtext:empty:before{content:"Type your vision...";color:var(--muted);font-weight:600}
+.vitem.loading{display:flex;align-items:center;justify-content:center;background:#eef0ff;border:1px dashed var(--accent)}
+.vload{color:var(--accent);font-size:12px;font-weight:600}
+.ndismiss{margin-left:auto;border:none;background:none;color:var(--muted);cursor:pointer;padding:4px;border-radius:6px;display:flex;align-items:center}
+.ndismiss:hover{background:#f0f0ef;color:var(--ink)}
 
 /* progress */
 .prog{height:8px;border-radius:6px;background:#eee;overflow:hidden}
@@ -431,8 +436,10 @@ async function renderDashboard(v){
   const nudges = await computeNudges(T,M);
   const sugg = isToday(date)?await missionSuggestions(M):null;
 
+  const monthCard = await analyticsCard();
   v.innerHTML =
     (nudges.length?'<div class="nudges">'+nudges.map(nudgeHtml).join('')+'</div>':'')
+    + '<div style="margin-bottom:18px">'+monthCard+'</div>'
     + '<div class="dash-top">'
       + '<div style="display:flex;flex-direction:column;gap:18px">'
         + todoCard(T)
@@ -442,7 +449,6 @@ async function renderDashboard(v){
     + '</div>'
     + '<div class="dash-bottom">'
       + visionCard(V)
-      + await analyticsCard()
     + '</div>';
   initVisionBoard();
 }
@@ -549,21 +555,22 @@ function goalsCard(G){
 }
 
 // ---- Vision board ----
+function vitemHTML(x){
+  const isText=x.kind==='text';
+  const left=x.x==null?24:x.x, top=x.y==null?24:x.y;
+  const w=x.w==null?240:x.w, h=x.h==null?(isText?70:200):x.h, z=x.z||1;
+  const inner = isText
+    ? '<div class="vtext">'+esc(x.content||'')+'</div>'
+    : '<img src="'+esc(x.image_url)+'" draggable="false">';
+  return '<div class="vitem '+(isText?'text':'img')+'" data-id="'+x.id+'" data-kind="'+(isText?'text':'image')+'" '
+    +'style="left:'+left+'px;top:'+top+'px;width:'+w+'px;height:'+h+'px;z-index:'+z+'">'
+    +inner
+    +'<button class="vdel" title="Delete" onclick="delVision(\''+x.id+'\',\''+esc(x.image_url||'')+'\')">'+svg(I.x,'')+'</button>'
+    +'<span class="vrz"></span>'
+  +'</div>';
+}
 function visionCard(V){
-  const items=V.map(x=>{
-    const isText=x.kind==='text';
-    const left=x.x==null?24:x.x, top=x.y==null?24:x.y;
-    const w=x.w==null?(isText?220:240):x.w, h=x.h==null?(isText?70:200):x.h, z=x.z||1;
-    const inner = isText
-      ? '<div class="vtext">'+esc(x.content||'')+'</div>'
-      : '<img src="'+esc(x.image_url)+'" draggable="false">';
-    return '<div class="vitem '+(isText?'text':'img')+'" data-id="'+x.id+'" data-kind="'+(isText?'text':'image')+'" '
-      +'style="left:'+left+'px;top:'+top+'px;width:'+w+'px;height:'+h+'px;z-index:'+z+'">'
-      +inner
-      +'<button class="vdel" title="Delete" onclick="delVision(\''+x.id+'\',\''+esc(x.image_url||'')+'\')">'+svg(I.x,'')+'</button>'
-      +'<span class="vrz"></span>'
-    +'</div>';
-  }).join('');
+  const items=V.map(vitemHTML).join('');
   return '<div class="card">'
     +'<div class="card-h">'+svg(I.image,'ic')+'<h2>Vision Board</h2>'
       +'<div style="margin-left:auto;display:flex;gap:8px">'
@@ -656,49 +663,62 @@ async function toggleGoal(id,done){
 async function delRow(table,id){await sb.from(table).delete().eq('id',id);navigate(state.view);}
 
 // ---- vision upload ----
+function clearVboardEmpty(board){const e=board.querySelector('.vboard-empty');if(e)e.remove();}
 async function uploadVision(input){
   const file=input.files[0];if(!file)return;
-  toast('Uploading...');
+  const board=el('vboard');if(!board)return;
+  clearVboardEmpty(board);
+  const n=board.querySelectorAll('.vitem').length;const off=(n%6)*26;
+  const x=30+off,y=30+off,w=240,h=200,z=n+1;
+  // instant placeholder so it feels responsive while the upload runs
+  const tmp='tmp'+Date.now();
+  board.insertAdjacentHTML('beforeend','<div class="vitem img loading" data-tmp="'+tmp+'" style="left:'+x+'px;top:'+y+'px;width:'+w+'px;height:'+h+'px;z-index:'+z+'"><div class="vload">Uploading...</div></div>');
+  input.value='';
   const path=Date.now()+'_'+file.name.replace(/[^a-zA-Z0-9._-]/g,'');
-  const {error}=await sb.storage.from(VBUCKET).upload(path,file,{upsert:true});
-  if(error){toast('Upload failed');return;}
+  const up=await sb.storage.from(VBUCKET).upload(path,file,{upsert:true});
+  const ph=board.querySelector('[data-tmp="'+tmp+'"]');
+  if(up.error){if(ph)ph.remove();toast('Upload failed');return;}
   const {data}=sb.storage.from(VBUCKET).getPublicUrl(path);
-  const {count}=await sb.from('dc_vision').select('id',{count:'exact',head:true});
-  const n=count||0;const off=(n%6)*26;
-  await sb.from('dc_vision').insert({kind:'image',image_url:data.publicUrl,x:30+off,y:30+off,w:240,h:200,z:n+1});
-  navigate('dashboard');
+  const ins=await sb.from('dc_vision').insert({kind:'image',image_url:data.publicUrl,x,y,w,h,z}).select().single();
+  if(ins.error){if(ph)ph.remove();toast('Could not save image');return;}
+  if(ph)ph.outerHTML=vitemHTML(ins.data); else board.insertAdjacentHTML('beforeend',vitemHTML(ins.data));
+  toast('Image added');
 }
 async function addVisionText(){
-  const {count}=await sb.from('dc_vision').select('id',{count:'exact',head:true});
-  const n=count||0;
-  await sb.from('dc_vision').insert({kind:'text',content:'Your vision...',x:40,y:40,w:240,h:70,z:n+1});
-  navigate('dashboard');
+  const board=el('vboard');if(!board)return;
+  clearVboardEmpty(board);
+  const n=board.querySelectorAll('.vitem').length;
+  const ins=await sb.from('dc_vision').insert({kind:'text',content:'',x:40,y:40,w:240,h:70,z:n+1}).select().single();
+  if(ins.error){toast('Could not add text');return;}
+  board.insertAdjacentHTML('beforeend',vitemHTML(ins.data));
+  const t=board.querySelector('.vitem[data-id="'+ins.data.id+'"] .vtext');
+  if(t){t.contentEditable='true';t.focus();}
+  toast('Type your vision, click away to save');
 }
 async function delVision(id,url){
   if(!confirm('Remove this item?'))return;
+  const board=el('vboard');const it=board&&board.querySelector('.vitem[data-id="'+id+'"]');if(it)it.remove();
   await sb.from('dc_vision').delete().eq('id',id);
   try{const p=(url||'').split('/'+VBUCKET+'/')[1];if(p)await sb.storage.from(VBUCKET).remove([p]);}catch(e){}
-  navigate('dashboard');
 }
 // ---- free-form board interactions (drag / resize / text / z-order) ----
+// Delegated so dynamically-added items work without re-rendering the dashboard.
 function initVisionBoard(){
   const board=el('vboard');if(!board||board._wired)return;board._wired=true;
   let drag=null;
   board.addEventListener('pointerdown',e=>{
     const item=e.target.closest('.vitem');if(!item)return;
     if(e.target.closest('.vdel'))return;
-    if(e.target.isContentEditable)return;
+    if(e.target.isContentEditable)return; // editing text: allow caret, no drag
     const isRz=!!e.target.closest('.vrz');
-    bringToFront(item);
     const r=item.getBoundingClientRect();
-    drag={item,mode:isRz?'resize':'move',sx:e.clientX,sy:e.clientY,
+    drag={item,pid:e.pointerId,mode:isRz?'resize':'move',active:isRz,sx:e.clientX,sy:e.clientY,
       ox:parseFloat(item.style.left)||0,oy:parseFloat(item.style.top)||0,ow:r.width,oh:r.height};
-    try{item.setPointerCapture(e.pointerId);}catch(_){}
-    e.preventDefault();
   });
   board.addEventListener('pointermove',e=>{
     if(!drag)return;
     const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;
+    if(!drag.active){ if(Math.abs(dx)+Math.abs(dy)<4)return; drag.active=true; bringToFront(drag.item); try{drag.item.setPointerCapture(drag.pid);}catch(_){} }
     if(drag.mode==='move'){
       drag.item.style.left=Math.max(0,drag.ox+dx)+'px';
       drag.item.style.top=Math.max(0,drag.oy+dy)+'px';
@@ -708,18 +728,23 @@ function initVisionBoard(){
     }
   });
   async function endDrag(){
-    if(!drag)return;const it=drag.item;drag=null;
-    const r=it.getBoundingClientRect();
+    if(!drag)return;const d=drag;drag=null;
+    if(!d.active)return; // a click, nothing moved
+    const it=d.item;const r=it.getBoundingClientRect();
     await sb.from('dc_vision').update({x:Math.round(parseFloat(it.style.left)||0),y:Math.round(parseFloat(it.style.top)||0),
       w:Math.round(r.width),h:Math.round(r.height)}).eq('id',it.dataset.id);
   }
   board.addEventListener('pointerup',endDrag);
   board.addEventListener('pointercancel',endDrag);
-  [...board.querySelectorAll('.vtext')].forEach(t=>{
-    t.addEventListener('dblclick',()=>{t.contentEditable='true';t.focus();
-      const sel=window.getSelection();sel.selectAllChildren(t);});
-    t.addEventListener('blur',async()=>{t.contentEditable='false';
-      await sb.from('dc_vision').update({content:t.innerText}).eq('id',t.closest('.vitem').dataset.id);});
+  board.addEventListener('dblclick',e=>{
+    const t=e.target.closest('.vtext');if(!t)return;
+    t.contentEditable='true';t.focus();
+    const sel=window.getSelection();sel.selectAllChildren(t);
+  });
+  board.addEventListener('focusout',async e=>{
+    const t=e.target.closest&&e.target.closest('.vtext');if(!t||t.contentEditable!=='true')return;
+    t.contentEditable='false';
+    await sb.from('dc_vision').update({content:t.innerText}).eq('id',t.closest('.vitem').dataset.id);
   });
 }
 async function bringToFront(item){
@@ -753,11 +778,21 @@ async function computeNudges(T,M){
   const {data:blocks}=await sb.from('dc_timeblocks').select('*').eq('block_date',state.date);
   const up=(blocks||[]).map(b=>({b,s:hm(b.start_time)})).filter(x=>x.s>now&&x.s-now<=0.5).sort((a,b)=>a.s-b.s)[0];
   if(up) out.push({warn:false,t:'Coming up at '+fmtTime(up.b.start_time)+': '+up.b.title});
-  return out;
+  const dis=getDismissed();
+  return out.map(n=>({warn:n.warn,t:n.t,id:hashStr(n.t)})).filter(n=>!dis.includes(n.id));
 }
 function nudgeHtml(n){
-  return '<div class="nudge '+(n.warn?'warn':'')+'">'+svg(n.warn?I.bell:I.spark,'')
-    +'<span>'+esc(n.t)+'</span></div>';
+  return '<div class="nudge '+(n.warn?'warn':'')+'" data-id="'+n.id+'">'+svg(n.warn?I.bell:I.spark,'')
+    +'<span>'+esc(n.t)+'</span>'
+    +'<button class="ndismiss" title="Dismiss" onclick="dismissNudge(\''+n.id+'\')">'+svg(I.x,'')+'</button></div>';
+}
+function hashStr(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0;}return 'n'+(h>>>0);}
+function dismissedKey(){return 'dc_dismissed_'+state.date;}
+function getDismissed(){try{return JSON.parse(localStorage.getItem(dismissedKey())||'[]');}catch(e){return [];}}
+function dismissNudge(id){
+  const arr=getDismissed();if(!arr.includes(id)){arr.push(id);localStorage.setItem(dismissedKey(),JSON.stringify(arr));}
+  const node=document.querySelector('.nudge[data-id="'+id+'"]');
+  if(node){const cont=node.parentElement;node.remove();if(cont&&!cont.querySelector('.nudge'))cont.remove();}
 }
 
 // ===================== TIME-BLOCKING =====================
@@ -919,7 +954,7 @@ checkGate();
 
 // expose for inline handlers
 Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,addRoutine,addMission,quickAddMission,
-  toggleMission,moveMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,addBlock,delBlock,autoSchedule,
+  toggleMission,moveMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,addBlock,delBlock,autoSchedule,
   addWorkout,addFood,tryUnlock,lock});
 </script>
 <script>
