@@ -210,6 +210,9 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .exadd input{border:1px solid var(--line2);border-radius:9px;padding:10px 11px}
 .exadd .nmin{flex:1;min-width:0}
 .exadd .stin{width:74px;text-align:center}
+.coachbtns{display:flex;flex-wrap:wrap;gap:8px}
+.coachout{margin-top:14px;background:#f7f7f6;border:1px solid var(--line);border-radius:10px;padding:14px 16px;white-space:pre-wrap;font-size:14px;line-height:1.6}
+.coachout.thinking{color:var(--muted);font-style:italic}
 
 /* modal */
 .modal-bg{position:fixed;inset:0;background:rgba(15,15,15,.4);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
@@ -1016,6 +1019,16 @@ async function renderWorkouts(v){
     +'<div class="card"><div class="stat"><div class="n">'+mins+'</div><div class="l">Minutes this month</div></div></div>'
     +'<div class="card"><div class="stat"><div class="n">'+(count?Math.round(mins/count):0)+'</div><div class="l">Avg minutes</div></div></div>'
   +'</div><div style="height:18px"></div>';
+  html+='<div class="card"><div class="card-h">'+svg(I.spark,'ic')+'<h2>AI Coach</h2></div><div class="card-b">'
+    +'<div style="font-size:13px;color:var(--muted);margin-bottom:12px">Coaching based on your logged lifts and food -- progressive overload, session tips and nutrition.</div>'
+    +'<div class="coachbtns">'
+      +'<button class="btn sm" onclick="askCoach(\'overload\',this)">Progressive overload</button>'
+      +'<button class="btn sm" onclick="askCoach(\'session\',this)">Session tips</button>'
+      +'<button class="btn sm" onclick="askCoach(\'nutrition\',this)">Nutrition</button>'
+      +'<button class="btn primary sm" onclick="askCoach(\'full\',this)">'+svg(I.spark,'')+' Full check-in</button>'
+    +'</div>'
+    +'<div id="coachOut" class="coachout hide"></div>'
+  +'</div></div><div style="height:18px"></div>';
   html+='<div class="card"><div class="card-h">'+svg(I.dumbbell,'ic')+'<h2>Your workout plans</h2></div><div class="card-b">';
   if(TPL.length){
     html+=TPL.map(t=>{
@@ -1174,6 +1187,18 @@ async function discardWorkout(){
   await sb.from('dc_workout_sessions').delete().eq('id',id);
   clearWorkoutTimers();localStorage.removeItem('dc_active_session');state.activeWorkout=null;navigate('workouts');
 }
+async function askCoach(scope,btn){
+  const out=el('coachOut');if(!out)return;
+  out.classList.remove('hide');out.classList.add('thinking');out.textContent='Coach is reviewing your data...';
+  const btns=[...document.querySelectorAll('.coachbtns button')];btns.forEach(b=>b.disabled=true);
+  try{
+    const {data,error}=await sb.functions.invoke('coach',{body:{scope}});
+    out.classList.remove('thinking');
+    if(error){out.textContent='Could not reach the coach: '+(error.message||error)+'\nIf you just set the API key, give it a few seconds and retry.';}
+    else{out.textContent=(data&&data.tips)?data.tips:'No response. Try again.';}
+  }catch(e){out.classList.remove('thinking');out.textContent='Error: '+e;}
+  btns.forEach(b=>b.disabled=false);
+}
 
 // ===================== FOOD =====================
 async function renderFood(v){
@@ -1229,7 +1254,7 @@ checkGate();
 Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,addRoutine,addMission,quickAddMission,
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,deleteSession,
-  startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,
+  startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
   addFood,tryUnlock,lock});
 </script>
 <script>
