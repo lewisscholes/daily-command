@@ -741,6 +741,13 @@ function initVisionBoard(){
     t.contentEditable='true';t.focus();
     const sel=window.getSelection();sel.selectAllChildren(t);
   });
+  // save as you type (debounced) so text persists even if blur doesn't fire
+  let saveT=null;
+  board.addEventListener('input',e=>{
+    const t=e.target.closest&&e.target.closest('.vtext');if(!t)return;
+    const id=t.closest('.vitem').dataset.id;const val=t.innerText;
+    clearTimeout(saveT);saveT=setTimeout(()=>{sb.from('dc_vision').update({content:val}).eq('id',id);},500);
+  });
   board.addEventListener('focusout',async e=>{
     const t=e.target.closest&&e.target.closest('.vtext');if(!t||t.contentEditable!=='true')return;
     t.contentEditable='false';
