@@ -135,6 +135,25 @@ input,select,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
 .vadd{display:flex;align-items:center;justify-content:center;border:1.5px dashed #cfcfcc;color:var(--muted);cursor:pointer;flex-direction:column;gap:6px;font-size:12px;font-weight:600}
 .vadd:hover{border-color:var(--accent);color:var(--accent)}
 
+/* free-form vision board */
+.vboard{position:relative;height:660px;background:#fbfbfa;overflow:hidden;border-radius:0 0 var(--radius) var(--radius);
+  background-image:radial-gradient(#e7e7e5 1px,transparent 1px);background-size:24px 24px;touch-action:none}
+.vboard-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none;text-align:center;padding:0 20px}
+.vitem{position:absolute;cursor:grab;border-radius:10px;box-shadow:var(--shadow);touch-action:none;user-select:none}
+.vitem:active{cursor:grabbing}
+.vitem.img{overflow:hidden;background:#eee}
+.vitem.img img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;border-radius:10px}
+.vitem.text{box-shadow:none;background:transparent;border-radius:6px}
+.vtext{width:100%;height:100%;outline:none;font-weight:700;font-size:22px;line-height:1.25;color:var(--ink);
+  padding:6px 8px;overflow:hidden;cursor:grab;white-space:pre-wrap;word-break:break-word}
+.vtext[contenteditable="true"]{cursor:text;background:rgba(255,255,255,.85);box-shadow:0 0 0 2px var(--accent);border-radius:6px}
+.vitem .vdel{position:absolute;top:5px;right:5px;width:24px;height:24px;border:none;border-radius:6px;
+  background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:.12s;z-index:2}
+.vitem:hover .vdel{opacity:1}
+.vitem .vrz{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;
+  background:linear-gradient(135deg,transparent 48%,var(--accent) 48%);border-radius:0 0 10px 0;opacity:0;transition:.12s;z-index:2}
+.vitem:hover .vrz{opacity:.95}
+
 /* progress */
 .prog{height:8px;border-radius:6px;background:#eee;overflow:hidden}
 .prog > i{display:block;height:100%;background:var(--accent);border-radius:6px;transition:width .3s}
@@ -425,6 +444,7 @@ async function renderDashboard(v){
       + visionCard(V)
       + await analyticsCard()
     + '</div>';
+  initVisionBoard();
 }
 
 // ---- To-Do (recurring) ----
@@ -438,7 +458,7 @@ function todoCard(T){
       +'<span class="tag '+t.category+'">'+titleCase(t.category)+'</span>'
       +'<div class="row-acts">'
         +'<button class="btn ghost sm" title="Move to tomorrow" onclick="moveTask(\''+t.id+'\')">'+svg(I.move,'')+'</button>'
-        +'<button class="btn ghost sm" onclick="delRow(\'dc_tasks\',\''+t.id+'\')">'+svg(I.trash,'')+'</button>'
+        +'<button class="btn ghost sm" title="Delete" onclick="deleteTask(\''+t.id+'\',\''+(t.routine_id||'')+'\')">'+svg(I.trash,'')+'</button>'
       +'</div></div>';
   }).join('') : '<div class="empty">No routines yet. Add one below and it will appear here each day.</div>';
   return '<div class="card">'
@@ -530,14 +550,29 @@ function goalsCard(G){
 
 // ---- Vision board ----
 function visionCard(V){
-  const tiles=V.map(x=>
-    '<div class="vtile">'+(x.image_url?'<img src="'+esc(x.image_url)+'">':'')+
-    (x.caption||x.title?'<div class="cap">'+esc(x.caption||x.title)+'</div>':'')+
-    '<button class="del" onclick="delVision(\''+x.id+'\',\''+esc(x.image_url)+'\')">'+svg(I.x,'')+'</button></div>').join('');
+  const items=V.map(x=>{
+    const isText=x.kind==='text';
+    const left=x.x==null?24:x.x, top=x.y==null?24:x.y;
+    const w=x.w==null?(isText?220:240):x.w, h=x.h==null?(isText?70:200):x.h, z=x.z||1;
+    const inner = isText
+      ? '<div class="vtext">'+esc(x.content||'')+'</div>'
+      : '<img src="'+esc(x.image_url)+'" draggable="false">';
+    return '<div class="vitem '+(isText?'text':'img')+'" data-id="'+x.id+'" data-kind="'+(isText?'text':'image')+'" '
+      +'style="left:'+left+'px;top:'+top+'px;width:'+w+'px;height:'+h+'px;z-index:'+z+'">'
+      +inner
+      +'<button class="vdel" title="Delete" onclick="delVision(\''+x.id+'\',\''+esc(x.image_url||'')+'\')">'+svg(I.x,'')+'</button>'
+      +'<span class="vrz"></span>'
+    +'</div>';
+  }).join('');
   return '<div class="card">'
-    +'<div class="card-h">'+svg(I.image,'ic')+'<h2>Vision Board</h2></div>'
-    +'<div class="card-b"><div class="vision-grid">'+tiles
-      +'<label class="vtile vadd">'+svg(I.plus,'')+'<span>Add image</span><input type="file" accept="image/*" class="hide" onchange="uploadVision(this)"></label>'
+    +'<div class="card-h">'+svg(I.image,'ic')+'<h2>Vision Board</h2>'
+      +'<div style="margin-left:auto;display:flex;gap:8px">'
+        +'<button class="btn sm" onclick="addVisionText()">'+svg(I.plus,'')+' Text</button>'
+        +'<label class="btn sm primary" style="cursor:pointer;display:flex;align-items:center;gap:6px">'+svg(I.plus,'')+' Image<input type="file" accept="image/*" class="hide" onchange="uploadVision(this)"></label>'
+      +'</div>'
+    +'</div>'
+    +'<div class="card-b" style="padding:0"><div class="vboard" id="vboard">'+items
+      +(V.length?'':'<div class="vboard-empty">Add an image or text, then drag it anywhere, resize from the corner, and overlap freely. Double-click text to edit.</div>')
     +'</div></div></div>';
 }
 
@@ -581,6 +616,17 @@ async function moveTask(id){
   await sb.from('dc_tasks').update({scheduled_date:addDays(state.date,1),status:'pending'}).eq('id',id);
   toast('Moved to '+shortDate(addDays(state.date,1)));navigate('dashboard');
 }
+async function deleteTask(id,routineId){
+  // Routine-backed tasks get regenerated each day by ensureTasksFor, so to truly
+  // delete one we remove the underlying routine too (then it stops recurring).
+  if(routineId){
+    if(!confirm('Delete this routine? It will stop appearing each day.'))return;
+    await sb.from('dc_routines').delete().eq('id',routineId);
+  }
+  await sb.from('dc_tasks').delete().eq('id',id);
+  toast(routineId?'Routine deleted':'Task deleted');
+  navigate('dashboard');
+}
 async function addMission(){
   const t=el('nmTitle').value.trim();if(!t)return;
   await sb.from('dc_missions').insert({title:t,category:'general',priority:el('nmPri').value,scheduled_date:state.date});
@@ -617,15 +663,71 @@ async function uploadVision(input){
   const {error}=await sb.storage.from(VBUCKET).upload(path,file,{upsert:true});
   if(error){toast('Upload failed');return;}
   const {data}=sb.storage.from(VBUCKET).getPublicUrl(path);
-  const cap=prompt('Add a caption (optional):')||'';
-  await sb.from('dc_vision').insert({image_url:data.publicUrl,caption:cap,title:cap});
+  const {count}=await sb.from('dc_vision').select('id',{count:'exact',head:true});
+  const n=count||0;const off=(n%6)*26;
+  await sb.from('dc_vision').insert({kind:'image',image_url:data.publicUrl,x:30+off,y:30+off,w:240,h:200,z:n+1});
+  navigate('dashboard');
+}
+async function addVisionText(){
+  const {count}=await sb.from('dc_vision').select('id',{count:'exact',head:true});
+  const n=count||0;
+  await sb.from('dc_vision').insert({kind:'text',content:'Your vision...',x:40,y:40,w:240,h:70,z:n+1});
   navigate('dashboard');
 }
 async function delVision(id,url){
-  if(!confirm('Remove this image?'))return;
+  if(!confirm('Remove this item?'))return;
   await sb.from('dc_vision').delete().eq('id',id);
-  try{const p=url.split('/'+VBUCKET+'/')[1];if(p)await sb.storage.from(VBUCKET).remove([p]);}catch(e){}
+  try{const p=(url||'').split('/'+VBUCKET+'/')[1];if(p)await sb.storage.from(VBUCKET).remove([p]);}catch(e){}
   navigate('dashboard');
+}
+// ---- free-form board interactions (drag / resize / text / z-order) ----
+function initVisionBoard(){
+  const board=el('vboard');if(!board||board._wired)return;board._wired=true;
+  let drag=null;
+  board.addEventListener('pointerdown',e=>{
+    const item=e.target.closest('.vitem');if(!item)return;
+    if(e.target.closest('.vdel'))return;
+    if(e.target.isContentEditable)return;
+    const isRz=!!e.target.closest('.vrz');
+    bringToFront(item);
+    const r=item.getBoundingClientRect();
+    drag={item,mode:isRz?'resize':'move',sx:e.clientX,sy:e.clientY,
+      ox:parseFloat(item.style.left)||0,oy:parseFloat(item.style.top)||0,ow:r.width,oh:r.height};
+    try{item.setPointerCapture(e.pointerId);}catch(_){}
+    e.preventDefault();
+  });
+  board.addEventListener('pointermove',e=>{
+    if(!drag)return;
+    const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;
+    if(drag.mode==='move'){
+      drag.item.style.left=Math.max(0,drag.ox+dx)+'px';
+      drag.item.style.top=Math.max(0,drag.oy+dy)+'px';
+    }else{
+      drag.item.style.width=Math.max(60,drag.ow+dx)+'px';
+      drag.item.style.height=Math.max(40,drag.oh+dy)+'px';
+    }
+  });
+  async function endDrag(){
+    if(!drag)return;const it=drag.item;drag=null;
+    const r=it.getBoundingClientRect();
+    await sb.from('dc_vision').update({x:Math.round(parseFloat(it.style.left)||0),y:Math.round(parseFloat(it.style.top)||0),
+      w:Math.round(r.width),h:Math.round(r.height)}).eq('id',it.dataset.id);
+  }
+  board.addEventListener('pointerup',endDrag);
+  board.addEventListener('pointercancel',endDrag);
+  [...board.querySelectorAll('.vtext')].forEach(t=>{
+    t.addEventListener('dblclick',()=>{t.contentEditable='true';t.focus();
+      const sel=window.getSelection();sel.selectAllChildren(t);});
+    t.addEventListener('blur',async()=>{t.contentEditable='false';
+      await sb.from('dc_vision').update({content:t.innerText}).eq('id',t.closest('.vitem').dataset.id);});
+  });
+}
+async function bringToFront(item){
+  const board=el('vboard');if(!board)return;
+  const max=Math.max(0,...[...board.querySelectorAll('.vitem')].map(x=>parseInt(x.style.zIndex)||0));
+  if((parseInt(item.style.zIndex)||0)===max)return;
+  item.style.zIndex=max+1;
+  await sb.from('dc_vision').update({z:max+1}).eq('id',item.dataset.id);
 }
 
 // ===================== NUDGES =====================
@@ -816,8 +918,8 @@ el('lockBtn').addEventListener('click',lock);
 checkGate();
 
 // expose for inline handlers
-Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,addRoutine,addMission,quickAddMission,
-  toggleMission,moveMission,addGoal,toggleGoal,delRow,uploadVision,delVision,addBlock,delBlock,autoSchedule,
+Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,addRoutine,addMission,quickAddMission,
+  toggleMission,moveMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,addBlock,delBlock,autoSchedule,
   addWorkout,addFood,tryUnlock,lock});
 </script>
 <script>
