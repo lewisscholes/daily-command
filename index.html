@@ -746,7 +746,7 @@ function initVisionBoard(){
   board.addEventListener('input',e=>{
     const t=e.target.closest&&e.target.closest('.vtext');if(!t)return;
     const id=t.closest('.vitem').dataset.id;const val=t.innerText;
-    clearTimeout(saveT);saveT=setTimeout(()=>{sb.from('dc_vision').update({content:val}).eq('id',id);},500);
+    clearTimeout(saveT);saveT=setTimeout(async()=>{await sb.from('dc_vision').update({content:val}).eq('id',id);},500);
   });
   board.addEventListener('focusout',async e=>{
     const t=e.target.closest&&e.target.closest('.vtext');if(!t||t.contentEditable!=='true')return;
