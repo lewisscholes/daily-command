@@ -465,17 +465,25 @@ async function navigate(k){
 
 // ===================== DASHBOARD =====================
 async function ensureTasksFor(date){
-  // Never auto-generate routine tasks for past days (that was duplicating tasks
-  // onto yesterday/earlier when navigating back).
+  // Never auto-generate tasks for past days (that was duplicating onto yesterday).
   if(date < todayStr()) return;
-  const {data:routines}=await sb.from('dc_routines').select('*').eq('active',true);
-  if(!routines||!routines.length) return;
-  const {data:existing}=await sb.from('dc_tasks').select('routine_id').eq('scheduled_date',date);
-  const have=new Set((existing||[]).map(r=>r.routine_id));
-  const d=dow(date);const add=[];
-  for(const r of routines){
-    if(have.has(r.id))continue;
+  const d=dow(date);
+  const [{data:routines},{data:existing},{data:tpls}]=await Promise.all([
+    sb.from('dc_routines').select('*').eq('active',true),
+    sb.from('dc_tasks').select('routine_id,template_id').eq('scheduled_date',date),
+    sb.from('dc_workout_templates').select('id,name').eq('weekday',d)
+  ]);
+  const haveR=new Set((existing||[]).filter(r=>r.routine_id).map(r=>r.routine_id));
+  const haveT=new Set((existing||[]).filter(r=>r.template_id).map(r=>r.template_id));
+  const add=[];
+  for(const r of (routines||[])){
+    if(haveR.has(r.id))continue;
     if(isDue(r,d))add.push({routine_id:r.id,title:r.title,category:r.category,scheduled_date:date,scheduled_time:r.default_time,sort_order:r.sort_order});
+  }
+  // scheduled workout sessions for this weekday auto-add as a to-do
+  for(const tp of (tpls||[])){
+    if(haveT.has(tp.id))continue;
+    add.push({template_id:tp.id,title:tp.name,category:'workout',scheduled_date:date,sort_order:-1});
   }
   if(add.length)await sb.from('dc_tasks').insert(add);
 }
@@ -534,7 +542,7 @@ function todoCard(T){
       +'<span class="tag '+t.category+'">'+titleCase(t.category)+'</span>'
       +'<div class="row-acts">'
         +'<button class="btn ghost sm" title="Move to tomorrow" onclick="moveTask(\''+t.id+'\')">'+svg(I.move,'')+'</button>'
-        +'<button class="btn ghost sm" title="Delete" onclick="deleteTask(\''+t.id+'\',\''+(t.routine_id||'')+'\')">'+svg(I.trash,'')+'</button>'
+        +'<button class="btn ghost sm" title="Delete" onclick="deleteTask(\''+t.id+'\')">'+svg(I.trash,'')+'</button>'
       +'</div></div>';
   }).join('')+'</div>' : '<div class="empty">No routines yet. Add one below and it will appear here each day.</div>';
   return '<div class="card" id="card-todo">'
@@ -694,24 +702,32 @@ async function toggleTask(node,id,status){
   await sb.from('dc_tasks').update({status:nowDone?'done':'pending',completed_at:nowDone?new Date().toISOString():null}).eq('id',id);
 }
 async function moveTask(id){
-  const {data:t}=await sb.from('dc_tasks').select('routine_id,title,category,sort_order').eq('id',id).single();
+  const {data:t}=await sb.from('dc_tasks').select('routine_id,template_id,title,category,sort_order').eq('id',id).single();
   const target=addDays(state.date,1);
-  // For routine-backed tasks, leave a skipped tombstone on the source day so the
-  // routine does not auto-regenerate there -- keeps the task on ONE day only.
-  if(t&&t.routine_id){
-    await sb.from('dc_tasks').insert({routine_id:t.routine_id,title:t.title,category:t.category,scheduled_date:state.date,status:'skipped',sort_order:t.sort_order});
+  // For routine- or plan-backed tasks, leave a skipped tombstone on the source day
+  // so it does not auto-regenerate there -- keeps the task on ONE day only.
+  if(t&&(t.routine_id||t.template_id)){
+    await sb.from('dc_tasks').insert({routine_id:t.routine_id||null,template_id:t.template_id||null,title:t.title,category:t.category,scheduled_date:state.date,status:'skipped',sort_order:t.sort_order});
   }
   await sb.from('dc_tasks').update({scheduled_date:target,status:'pending'}).eq('id',id);
   toast('Moved to '+shortDate(target));await refreshTodo();
 }
-async function deleteTask(id,routineId){
-  // Routine-backed tasks regenerate each day, so deleting one removes the routine too.
-  if(routineId){
+async function deleteTask(id){
+  const {data:t}=await sb.from('dc_tasks').select('routine_id,template_id').eq('id',id).single();
+  if(!t){await refreshTodo();return;}
+  if(t.routine_id){
     if(!confirm('Delete this routine? It will stop appearing each day.'))return;
-    await sb.from('dc_routines').delete().eq('id',routineId);
+    await sb.from('dc_routines').delete().eq('id',t.routine_id);
+    await sb.from('dc_tasks').delete().eq('id',id);
+    toast('Routine deleted');
+  } else if(t.template_id){
+    // workout session to-do: tombstone so it does not regenerate today (plan stays)
+    await sb.from('dc_tasks').update({status:'skipped'}).eq('id',id);
+    toast('Removed from today');
+  } else {
+    await sb.from('dc_tasks').delete().eq('id',id);
+    toast('Task deleted');
   }
-  await sb.from('dc_tasks').delete().eq('id',id);
-  toast(routineId?'Routine deleted':'Task deleted');
   await refreshTodo();
 }
 async function addMission(){
@@ -1101,6 +1117,13 @@ async function renderTemplateEditor(v){
   if(!t){state.editingTemplate=null;return renderWorkouts(v);}
   const exs=(t.dc_template_exercises||[]).slice().sort((a,b)=>(a.sort_order-b.sort_order)||(new Date(a.created_at)-new Date(b.created_at)));
   let html='<div class="wktop"><button class="btn ghost sm" onclick="closeEditor()">'+svg(I.back,'')+'</button><div class="nm">'+esc(t.name)+'<small>Edit plan</small></div></div>';
+  const days=['None','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  html+='<div class="card"><div class="card-b" style="padding:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<span style="font-weight:600;font-size:13px">Auto-add to To-Do on</span>'
+    +'<select id="tplWeekday" onchange="setTemplateWeekday(this.value)" style="border:1px solid var(--line2);border-radius:9px;padding:9px 11px">'
+    +days.map((lbl,idx)=>{const val=lbl==='None'?'':(lbl==='Sun'?0:idx);const sel=((t.weekday==null&&lbl==='None')||(t.weekday===val&&lbl!=='None'))?' selected':'';return '<option value="'+val+'"'+sel+'>'+lbl+'</option>';}).join('')
+    +'</select>'
+  +'</div></div>';
   html+='<div class="card"><div class="card-h">'+svg(I.dumbbell,'ic')+'<h2>Exercises</h2></div><div class="card-b">';
   html+=exs.length?exs.map(e=>'<div class="tbox"><div class="rt"><div class="t">'+esc(e.name)+'</div><div class="m">'+(e.target_sets||0)+' sets</div></div>'
     +'<button class="btn ghost sm" title="Delete" onclick="deleteTemplateExercise(\''+e.id+'\')">'+svg(I.trash,'')+'</button></div>').join(''):'<div class="empty">Add the movements for this plan.</div>';
@@ -1128,6 +1151,11 @@ async function addTemplateExercise(){
 }
 async function deleteTemplateExercise(id){await sb.from('dc_template_exercises').delete().eq('id',id);navigate('workouts');}
 async function deleteTemplate(id){if(!confirm('Delete this plan?'))return;await sb.from('dc_workout_templates').delete().eq('id',id);navigate('workouts');}
+async function setTemplateWeekday(val){
+  const w=val===''?null:parseInt(val);
+  await sb.from('dc_workout_templates').update({weekday:w}).eq('id',state.editingTemplate);
+  toast(w==null?'Auto-add to To-Do turned off':'Will auto-add to your To-Do on its day');
+}
 async function deleteSession(id){if(!confirm('Delete this logged workout?'))return;await sb.from('dc_workout_sessions').delete().eq('id',id);navigate('workouts');}
 
 // ---- start + run a workout ----
@@ -1136,14 +1164,14 @@ async function startWorkout(tid){
   const {data:s}=await sb.from('dc_workout_sessions').insert({template_id:tid,name:t?t.name:'Workout',session_date:todayStr(),started_at:new Date().toISOString(),completed:false}).select().single();
   if(!s){toast('Could not start');return;}
   localStorage.setItem('dc_active_session',s.id);
-  state.activeWorkout={id:s.id,name:s.name,startedAt:Date.now()};
+  state.activeWorkout={id:s.id,name:s.name,startedAt:Date.now(),templateId:tid,date:s.session_date};
   navigate('workouts');
 }
 async function renderActiveWorkout(v){
   const aw=state.activeWorkout;
   const {data:s}=await sb.from('dc_workout_sessions').select('*, dc_workout_templates(name, dc_template_exercises(*))').eq('id',aw.id).single();
   if(!s){state.activeWorkout=null;localStorage.removeItem('dc_active_session');return renderWorkouts(v);}
-  aw.startedAt=new Date(s.started_at).getTime();
+  aw.startedAt=new Date(s.started_at).getTime();aw.templateId=s.template_id;aw.date=s.session_date;
   const tpl=s.dc_workout_templates;
   const exs=((tpl&&tpl.dc_template_exercises)||[]).slice().sort((a,b)=>(a.sort_order-b.sort_order)||(new Date(a.created_at)-new Date(b.created_at)));
   const names=exs.map(e=>e.name);
@@ -1215,8 +1243,13 @@ async function logSet(btn){
   if(nowDone)startRest(restDefault);
 }
 async function finishWorkout(){
-  const dur=Math.round((Date.now()-state.activeWorkout.startedAt)/1000);
-  await sb.from('dc_workout_sessions').update({ended_at:new Date().toISOString(),duration_sec:dur,completed:true}).eq('id',state.activeWorkout.id);
+  const aw=state.activeWorkout;
+  const dur=Math.round((Date.now()-aw.startedAt)/1000);
+  await sb.from('dc_workout_sessions').update({ended_at:new Date().toISOString(),duration_sec:dur,completed:true}).eq('id',aw.id);
+  // auto-tick the matching workout to-do for that day
+  if(aw.templateId&&aw.date){
+    await sb.from('dc_tasks').update({status:'done',completed_at:new Date().toISOString()}).eq('scheduled_date',aw.date).eq('template_id',aw.templateId).neq('status','skipped');
+  }
   clearWorkoutTimers();localStorage.removeItem('dc_active_session');state.activeWorkout=null;
   toast('Workout complete -- '+fmtDur(dur));navigate('workouts');
 }
@@ -1292,7 +1325,7 @@ checkGate();
 // expose for inline handlers
 Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,addRoutine,addMission,quickAddMission,
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
-  createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,deleteSession,
+  createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
   addFood,tryUnlock,lock});
 </script>
