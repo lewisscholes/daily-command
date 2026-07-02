@@ -264,9 +264,12 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .tbox.noise{background:#fafafa}
 .tbox.done{background:#fbfdfb;border-color:#e3efe8}
 .tbox .rt .t{font-weight:500}
-.tbox .tgrip{flex:0 0 auto;color:#cdcdca;cursor:grab;display:flex;align-items:center;margin-left:-4px}
+.tbox .tgrip{flex:0 0 auto;color:#a9a9a6;cursor:grab;display:flex;align-items:center;justify-content:center;
+  margin-left:-6px;padding:6px 4px;touch-action:none;border-radius:6px}
+.tbox .tgrip:hover{color:var(--ink);background:#f0f0ef}
 .tbox .tgrip:active{cursor:grabbing}
-.tbox .tgrip svg{width:16px;height:16px}
+.tbox .tgrip svg{width:18px;height:18px}
+.tbox.dragging{box-shadow:var(--shadow);background:#fff}
 .tbox.dragging{opacity:.5}
 .tbox.dragover{outline:2px dashed var(--accent);outline-offset:2px}
 
@@ -345,7 +348,12 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 // ===================== CONSTANTS =====================
 const SUPABASE_URL = 'https://texnrfykwxqtorelchzn.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRleG5yZnlrd3hxdG9yZWxjaHpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5MTU3NzYsImV4cCI6MjA5NjQ5MTc3Nn0.zmbwee_YHAaqyryLDbkPJvrMavIcFHv9MjDYUhIhb7A';
-const PASSCODE = 'command'; // change this to your own passcode
+// Passcode -> account. Each account's workout data is kept separate by an `owner`
+// column. Only the main account (lewis) sees the full app; others are workout-only.
+const ACCOUNTS = {
+  command: { id:'lewis', full:true, sub:'your day, handled' },
+  yasmin:  { id:'yasmin', full:false, sub:'workouts' }
+};
 const VBUCKET = 'vision';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -378,7 +386,7 @@ const I = {
 function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
 // ===================== STATE =====================
-const state = { view:'dashboard', date:todayStr(), settings:null };
+const state = { view:'dashboard', date:todayStr(), settings:null, account:'lewis', full:true };
 
 // ===================== HELPERS =====================
 function todayStr(){const d=new Date();return ymd(d);}
@@ -400,21 +408,26 @@ function titleCase(s){return (s||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUp
 async function q(table){return sb.from(table);}
 
 // ===================== AUTH GATE =====================
+function applyAccount(a){state.account=a.id;state.full=a.full;}
 function checkGate(){
-  if(localStorage.getItem('dc_unlocked')==='1'){openApp();}
+  const acc=localStorage.getItem('dc_account');
+  if(localStorage.getItem('dc_unlocked')==='1' && acc){
+    applyAccount({id:acc,full:acc==='lewis'});openApp();
+  }
 }
 function tryUnlock(){
-  const v=el('passInput').value;
-  if(v===PASSCODE){localStorage.setItem('dc_unlocked','1');openApp();}
+  const v=(el('passInput').value||'').trim().toLowerCase();
+  const a=ACCOUNTS[v];
+  if(a){localStorage.setItem('dc_unlocked','1');localStorage.setItem('dc_account',a.id);applyAccount(a);openApp();}
   else{toast('Wrong passcode');el('passInput').value='';}
 }
-function lock(){localStorage.removeItem('dc_unlocked');location.reload();}
+function lock(){localStorage.removeItem('dc_unlocked');localStorage.removeItem('dc_account');location.reload();}
 async function openApp(){
   el('gate').classList.add('hide');
   el('app').classList.remove('hide');
   buildNav();
   state.settings = await loadSettings();
-  navigate('dashboard');
+  navigate(state.full?'dashboard':'workouts');
 }
 
 async function loadSettings(){
@@ -431,8 +444,10 @@ const NAVS=[
   {k:'food',t:'Food & Calories',i:I.food}
 ];
 function buildNav(){
-  el('nav').innerHTML = '<div class="label">Navigate</div>' + NAVS.map(n=>
+  const items = state.full ? NAVS : NAVS.filter(n=>n.k==='workouts');
+  el('nav').innerHTML = '<div class="label">Navigate</div>' + items.map(n=>
     '<button data-k="'+n.k+'" onclick="navigate(\''+n.k+'\')">'+svg(n.i)+'<span>'+n.t+'</span></button>').join('');
+  const bs=el('brandSub'); if(bs) bs.textContent = state.full?'your day, handled':'workouts';
 }
 function setActive(){[...document.querySelectorAll('.nav button')].forEach(b=>b.classList.toggle('active',b.dataset.k===state.view));}
 function renderDayNav(){
@@ -449,6 +464,7 @@ function goToday(){state.date=todayStr();navigate(state.view);}
 const TITLES={dashboard:'Dashboard',time:'Time-blocking',workouts:'Workouts',food:'Food & Calories'};
 async function navigate(k){
   clearWorkoutTimers();
+  if(!state.full) k='workouts'; // workout-only accounts cannot reach other views
   state.view=k;setActive();
   el('viewTitle').textContent=TITLES[k];
   el('viewSub').textContent=prettyDate(state.date);
@@ -471,7 +487,7 @@ async function ensureTasksFor(date){
   const [{data:routines},{data:existing},{data:tpls}]=await Promise.all([
     sb.from('dc_routines').select('*').eq('active',true),
     sb.from('dc_tasks').select('routine_id,template_id').eq('scheduled_date',date),
-    sb.from('dc_workout_templates').select('id,name').eq('weekday',d)
+    sb.from('dc_workout_templates').select('id,name').eq('weekday',d).eq('owner',state.account)
   ]);
   const haveR=new Set((existing||[]).filter(r=>r.routine_id).map(r=>r.routine_id));
   const haveT=new Set((existing||[]).filter(r=>r.template_id).map(r=>r.template_id));
@@ -800,25 +816,39 @@ function initDashGrid(){
   grid.addEventListener('dragend',finishDrag);
   function finishDrag(){[...grid.children].forEach(c=>{c.classList.remove('dragover','dragging');c.setAttribute('draggable','false');});dragKey=null;}
 }
-// drag-to-reorder the individual to-do items within the list
+// drag-to-reorder the individual to-do items within the list.
+// Uses pointer events (works with mouse AND touch) -- HTML5 drag was unreliable
+// on desktop and didn't work at all on mobile.
 function wireTodoDnD(){
   const list=el('todoList');if(!list||list._wired)return;list._wired=true;
-  let key=null;
-  list.addEventListener('mousedown',e=>{const g=e.target.closest('.tgrip');if(!g)return;const b=g.closest('.tbox');if(b)b.setAttribute('draggable','true');});
-  list.addEventListener('mouseup',()=>{[...list.querySelectorAll('.tbox')].forEach(b=>b.setAttribute('draggable','false'));});
-  list.addEventListener('dragstart',e=>{const b=e.target.closest('.tbox');if(!b||b.getAttribute('draggable')!=='true'){return;}key=b.dataset.id;b.classList.add('dragging');try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',key);}catch(_){}});
-  list.addEventListener('dragover',e=>{if(!key)return;e.preventDefault();const b=e.target.closest('.tbox');[...list.querySelectorAll('.tbox')].forEach(c=>c.classList.toggle('dragover',c===b&&c.dataset.id!==key));});
-  list.addEventListener('drop',async e=>{
-    if(!key)return;e.preventDefault();
-    const target=e.target.closest('.tbox');const dragged=list.querySelector('.tbox[data-id="'+key+'"]');
-    if(target&&dragged&&target!==dragged){const items=[...list.querySelectorAll('.tbox')];
-      if(items.indexOf(dragged)<items.indexOf(target))target.after(dragged);else target.before(dragged);}
-    const ids=[...list.querySelectorAll('.tbox')].map(c=>c.dataset.id);
-    finishTodo();
-    for(let i=0;i<ids.length;i++){await sb.from('dc_tasks').update({sort_order:i}).eq('id',ids[i]);}
+  let dragEl=null,startY=0,active=false,pid=null;
+  list.addEventListener('pointerdown',e=>{
+    const grip=e.target.closest('.tgrip');if(!grip)return;
+    dragEl=grip.closest('.tbox');if(!dragEl)return;
+    startY=e.clientY;active=false;pid=e.pointerId;
+    try{list.setPointerCapture(pid);}catch(_){}
+    e.preventDefault();
   });
-  list.addEventListener('dragend',finishTodo);
-  function finishTodo(){[...list.querySelectorAll('.tbox')].forEach(c=>{c.classList.remove('dragover','dragging');c.setAttribute('draggable','false');});key=null;}
+  list.addEventListener('pointermove',e=>{
+    if(!dragEl)return;
+    if(!active){if(Math.abs(e.clientY-startY)<5)return;active=true;dragEl.classList.add('dragging');}
+    e.preventDefault();
+    const sibs=[...list.querySelectorAll('.tbox')].filter(x=>x!==dragEl);
+    let placed=false;
+    for(const s of sibs){const r=s.getBoundingClientRect();if(e.clientY<r.top+r.height/2){list.insertBefore(dragEl,s);placed=true;break;}}
+    if(!placed)list.appendChild(dragEl);
+  });
+  async function endTodo(){
+    if(!dragEl)return;
+    const wasActive=active;dragEl.classList.remove('dragging');
+    try{list.releasePointerCapture(pid);}catch(_){}
+    dragEl=null;active=false;
+    if(!wasActive)return;
+    const ids=[...list.querySelectorAll('.tbox')].map(c=>c.dataset.id);
+    for(let i=0;i<ids.length;i++){await sb.from('dc_tasks').update({sort_order:i}).eq('id',ids[i]);}
+  }
+  list.addEventListener('pointerup',endTodo);
+  list.addEventListener('pointercancel',endTodo);
 }
 async function addGoal(){
   const t=el('ngGoal').value.trim();if(!t)return;
@@ -1064,8 +1094,8 @@ async function renderWorkouts(v){
 
   const now=new Date();const first=ymd(new Date(now.getFullYear(),now.getMonth(),1));const last=ymd(new Date(now.getFullYear(),now.getMonth()+1,0));
   const [tpls,sess]=await Promise.all([
-    sb.from('dc_workout_templates').select('*, dc_template_exercises(*)').order('sort_order').order('created_at'),
-    sb.from('dc_workout_sessions').select('*').gte('session_date',first).lte('session_date',last).eq('completed',true).order('started_at',{ascending:false})
+    sb.from('dc_workout_templates').select('*, dc_template_exercises(*)').eq('owner',state.account).order('sort_order').order('created_at'),
+    sb.from('dc_workout_sessions').select('*').eq('owner',state.account).gte('session_date',first).lte('session_date',last).eq('completed',true).order('started_at',{ascending:false})
   ]);
   const TPL=tpls.data||[];const S=sess.data||[];
   const count=S.length;const mins=Math.round(S.reduce((a,b)=>a+(b.duration_sec||0),0)/60);
@@ -1074,7 +1104,7 @@ async function renderWorkouts(v){
     +'<div class="card"><div class="stat"><div class="n">'+mins+'</div><div class="l">Minutes this month</div></div></div>'
     +'<div class="card"><div class="stat"><div class="n">'+(count?Math.round(mins/count):0)+'</div><div class="l">Avg minutes</div></div></div>'
   +'</div><div style="height:18px"></div>';
-  html+='<div class="card"><div class="card-h">'+svg(I.spark,'ic')+'<h2>AI Coach</h2></div><div class="card-b">'
+  if(state.full) html+='<div class="card"><div class="card-h">'+svg(I.spark,'ic')+'<h2>AI Coach</h2></div><div class="card-b">'
     +'<div style="font-size:13px;color:var(--muted);margin-bottom:12px">Coaching based on your logged lifts and food -- progressive overload, session tips and nutrition.</div>'
     +'<div class="coachbtns">'
       +'<button class="btn sm" onclick="askCoach(\'overload\',this)">Progressive overload</button>'
@@ -1138,7 +1168,7 @@ async function renderTemplateEditor(v){
 }
 async function createTemplate(){
   const n=el('ntplName').value.trim();if(!n)return;
-  const {data}=await sb.from('dc_workout_templates').insert({name:n}).select().single();
+  const {data}=await sb.from('dc_workout_templates').insert({name:n,owner:state.account}).select().single();
   if(data){state.editingTemplate=data.id;navigate('workouts');}
 }
 function editTemplate(id){state.editingTemplate=id;navigate('workouts');}
@@ -1161,7 +1191,7 @@ async function deleteSession(id){if(!confirm('Delete this logged workout?'))retu
 // ---- start + run a workout ----
 async function startWorkout(tid){
   const {data:t}=await sb.from('dc_workout_templates').select('name').eq('id',tid).single();
-  const {data:s}=await sb.from('dc_workout_sessions').insert({template_id:tid,name:t?t.name:'Workout',session_date:todayStr(),started_at:new Date().toISOString(),completed:false}).select().single();
+  const {data:s}=await sb.from('dc_workout_sessions').insert({template_id:tid,name:t?t.name:'Workout',session_date:todayStr(),started_at:new Date().toISOString(),completed:false,owner:state.account}).select().single();
   if(!s){toast('Could not start');return;}
   localStorage.setItem('dc_active_session',s.id);
   state.activeWorkout={id:s.id,name:s.name,startedAt:Date.now(),templateId:tid,date:s.session_date};
@@ -1177,7 +1207,7 @@ async function renderActiveWorkout(v){
   const names=exs.map(e=>e.name);
   const [logsR,histR]=await Promise.all([
     sb.from('dc_set_logs').select('*').eq('session_id',aw.id),
-    names.length?sb.from('dc_set_logs').select('exercise_name,weight,reps,session_id,created_at,done').in('exercise_name',names).eq('done',true).neq('session_id',aw.id).order('created_at',{ascending:false}).limit(300):Promise.resolve({data:[]})
+    names.length?sb.from('dc_set_logs').select('exercise_name,weight,reps,session_id,created_at,done').eq('owner',state.account).in('exercise_name',names).eq('done',true).neq('session_id',aw.id).order('created_at',{ascending:false}).limit(300):Promise.resolve({data:[]})
   ]);
   const logs=logsR.data||[]; const hist=histR.data||[];
   const logMap={}; logs.forEach(l=>{logMap[l.exercise_name+'#'+l.set_index]=l;});
@@ -1237,7 +1267,7 @@ async function logSet(btn){
   if(row.dataset.logid){
     await sb.from('dc_set_logs').update({weight:w,reps:r,done:nowDone}).eq('id',row.dataset.logid);
   } else {
-    const {data}=await sb.from('dc_set_logs').insert({session_id:state.activeWorkout.id,exercise_name:ex,set_index:idx,weight:w,reps:r,done:nowDone}).select().single();
+    const {data}=await sb.from('dc_set_logs').insert({session_id:state.activeWorkout.id,exercise_name:ex,set_index:idx,weight:w,reps:r,done:nowDone,owner:state.account}).select().single();
     if(data)row.dataset.logid=data.id;
   }
   if(nowDone)startRest(restDefault);
@@ -1264,7 +1294,7 @@ async function askCoach(scope,btn){
   out.classList.remove('hide');out.classList.add('thinking');out.textContent='Coach is reviewing your data...';
   const btns=[...document.querySelectorAll('.coachbtns button')];btns.forEach(b=>b.disabled=true);
   try{
-    const {data,error}=await sb.functions.invoke('coach',{body:{scope}});
+    const {data,error}=await sb.functions.invoke('coach',{body:{scope,owner:state.account}});
     out.classList.remove('thinking');
     if(error){out.textContent='Could not reach the coach: '+(error.message||error)+'\nIf you just set the API key, give it a few seconds and retry.';}
     else{out.textContent=(data&&data.tips)?data.tips:'No response. Try again.';}
