@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- YouDo build: premium polish + progress cues -->
+<!-- YouDo build: stripe-style theme -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -349,6 +349,55 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 .main::-webkit-scrollbar{width:12px}
 .main::-webkit-scrollbar-thumb{background:#dcdcda;border-radius:10px;border:3px solid transparent;background-clip:padding-box}
 .main::-webkit-scrollbar-thumb:hover{background:#cbcbc8;background-clip:padding-box}
+
+/* ===================== STRIPE-STYLE THEME ===================== */
+:root{
+  --bg:#f6f9fc;
+  --panel:#ffffff;
+  --card:#ffffff;
+  --ink:#0a2540;
+  --muted:#697386;
+  --line:#e6ebf1;
+  --line2:#dfe4ea;
+  --accent:#635bff;
+  --accent2:#9b6dff;
+  --accent-soft:#f1f1ff;
+  --ok:#3fbd7f; --ok-soft:#e8f8ef;
+  --signal:#f5a623; --signal-soft:#fff6e6;
+  --noise:#a5b0be;
+  --shadow:0 1px 3px rgba(10,37,64,.05),0 6px 22px rgba(10,37,64,.06);
+  --shadow-lg:0 14px 34px rgba(10,37,64,.12),0 4px 10px rgba(10,37,64,.05);
+}
+body{background:var(--bg);color:var(--ink)}
+.topbar{background:rgba(255,255,255,.82);border-bottom:1px solid var(--line)}
+.topbar::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#635bff,#9b6dff 45%,#ff8ab3)}
+.topbar h1{color:var(--ink);letter-spacing:-.3px}
+.daynav button{border-color:var(--line2)}
+.sidebar{background:var(--panel);border-right:1px solid var(--line)}
+.brand b{color:var(--ink)}
+.brand .logo,.gate .logo{background:linear-gradient(135deg,#635bff,#9b6dff 55%,#ff8ab3)}
+.nav button{color:#54617a}
+.nav button:hover{background:#f4f6fb}
+.nav button.active{background:var(--accent-soft);color:var(--accent);box-shadow:none;font-weight:600}
+.nav button.active svg{opacity:1}
+.nav .label{color:#8792a2}
+.card{border:1px solid var(--line);box-shadow:var(--shadow)}
+.card:hover{box-shadow:var(--shadow-lg)}
+.card-h{border-bottom:1px solid var(--line)}
+.card-h h2{color:var(--ink);letter-spacing:-.2px}
+.card-h .ic{color:var(--accent)}
+.stat .n{color:var(--ink)}
+.btn{border-color:var(--line2);color:#3c4257}
+.btn.primary{background:linear-gradient(135deg,#635bff,#9b6dff);color:#fff;box-shadow:0 1px 2px rgba(10,37,64,.10),0 3px 10px rgba(99,91,255,.30)}
+.btn.primary:hover{filter:brightness(1.04);box-shadow:0 6px 16px rgba(99,91,255,.42)}
+.tag{border-radius:6px;font-weight:600}
+.tbox{border-color:var(--line2)}
+.tbox:hover{border-color:#cfd7e3}
+.pbar>i,.prog>i{background:linear-gradient(90deg,#635bff,#9b6dff)}
+.sugg{background:linear-gradient(135deg,#f4f4ff,#fbf4ff);border-color:#e7e6ff}
+.gate{background:radial-gradient(120% 120% at 50% 0,#eef1ff,#f6f9fc)}
+.wktop,.restbar{border-color:var(--line)}
+.nudge{border-color:var(--line);border-left-color:var(--accent)}
 </style>
 </head>
 <body>
