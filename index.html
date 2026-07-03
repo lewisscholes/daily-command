@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- YouDo build: weight tracker + time-blocking removed from nav -->
+<!-- YouDo build: premium polish + progress cues -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -311,6 +311,44 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
   .stat .n{font-size:24px}
   .row-acts{opacity:1}
 }
+
+/* ===================== PREMIUM POLISH ===================== */
+:root{
+  --shadow:0 1px 2px rgba(17,17,26,.04),0 6px 18px rgba(17,17,26,.06);
+  --shadow-lg:0 16px 38px rgba(17,17,26,.12),0 5px 12px rgba(17,17,26,.06);
+  --accent2:#8a6cff;
+}
+body{background:linear-gradient(180deg,#f7f7f6 0%,#f2f2f5 100%)}
+.card{border-color:#ededec;box-shadow:var(--shadow);transition:box-shadow .22s ease}
+.card:hover{box-shadow:var(--shadow-lg)}
+.card-h h2{letter-spacing:-.2px}
+.card-h .ic{filter:drop-shadow(0 1px 2px rgba(91,108,255,.25))}
+.btn{transition:transform .12s ease, box-shadow .15s ease, background .15s ease, filter .15s ease}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;box-shadow:0 3px 10px rgba(91,108,255,.30)}
+.btn.primary:hover{filter:brightness(1.05);box-shadow:0 6px 16px rgba(91,108,255,.42)}
+.brand .logo,.gate .logo{box-shadow:0 8px 20px rgba(91,108,255,.35)}
+.nav button.active{box-shadow:0 2px 8px rgba(17,17,26,.06)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,108,255,.14)}
+.chk{transition:transform .18s cubic-bezier(.2,.9,.3,1.5),background .15s,border-color .15s,box-shadow .15s}
+.chk.done{box-shadow:0 2px 8px rgba(58,166,117,.35)}
+.chk svg{transition:opacity .15s ease, transform .18s ease}
+.chk.done svg{transform:scale(1.06)}
+.tbox{transition:transform .14s ease, box-shadow .15s ease, border-color .15s ease}
+.tbox:hover{transform:translateY(-1px)}
+.stat .n{letter-spacing:-1px}
+.prog>i{background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.pbar{height:4px;background:#ececef;overflow:hidden}
+.pbar>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .55s cubic-bezier(.4,0,.2,1)}
+.pbar.done>i{background:linear-gradient(90deg,#3aa675,#63d3a3)}
+.card-h .count{background:#f0f0ef;padding:2px 10px;border-radius:20px;transition:.2s;font-variant-numeric:tabular-nums}
+.card-h .count.alldone{background:var(--ok-soft);color:var(--ok)}
+.wkprogwrap{margin:0 0 16px}
+.wkprogwrap .pbar{border-radius:8px;height:8px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.03)}
+.wkproglab{font-size:12px;font-weight:600;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+.main::-webkit-scrollbar{width:12px}
+.main::-webkit-scrollbar-thumb{background:#dcdcda;border-radius:10px;border:3px solid transparent;background-clip:padding-box}
+.main::-webkit-scrollbar-thumb:hover{background:#cbcbc8;background-clip:padding-box}
 </style>
 </head>
 <body>
@@ -571,8 +609,11 @@ function todoCard(T){
         +'<button class="btn ghost sm" title="Delete" onclick="deleteTask(\''+t.id+'\')">'+svg(I.trash,'')+'</button>'
       +'</div></div>';
   }).join('')+'</div>' : '<div class="empty">No routines yet. Add one below and it will appear here each day.</div>';
+  const tdPct=T.length?Math.round(done/T.length*100):0;
+  const tdAll=T.length&&done===T.length;
   return '<div class="card" id="card-todo">'
-    +'<div class="card-h">'+svg(I.check,'ic')+'<h2>To-Do &middot; Daily Routines</h2><span class="count">'+done+'/'+T.length+'</span></div>'
+    +'<div class="card-h">'+svg(I.check,'ic')+'<h2>To-Do &middot; Daily Routines</h2><span class="count'+(tdAll?' alldone':'')+'">'+done+'/'+T.length+'</span></div>'
+    +'<div class="pbar'+(tdAll?' done':'')+'"><i style="width:'+tdPct+'%"></i></div>'
     +'<div class="card-b">'+rows
       +'<div class="addbar">'
         +'<input class="grow" id="ndTask" placeholder="Add a routine (e.g. Creatine)">'
@@ -605,8 +646,12 @@ function missionCard(M){
   body += '<div class="sn-head" style="margin-top:10px"><span class="dot n"></span><b>Noise</b><span class="hint">necessary, low-impact</span></div>';
   if(noise.length && !signalsDone && signals.length) body+='<div class="locked-note">Knock out your signals first. Noise can wait.</div>';
   body += noise.length?noise.map(m=>mrow(m,true)).join(''):'<div class="empty" style="padding:10px">Nothing here.</div>';
+  const sigDone=signals.filter(m=>m.status==='done').length;
+  const sigPct=signals.length?Math.round(sigDone/signals.length*100):0;
+  const sigAll=signals.length&&sigDone===signals.length;
   return '<div class="card" id="card-mission">'
-    +'<div class="card-h">'+svg(I.target,'ic')+'<h2>Mission &middot; Signal vs Noise</h2></div>'
+    +'<div class="card-h">'+svg(I.target,'ic')+'<h2>Mission &middot; Signal vs Noise</h2>'+(signals.length?'<span class="count'+(sigAll?' alldone':'')+'">'+sigDone+'/'+signals.length+' signals</span>':'')+'</div>'
+    +'<div class="pbar'+(sigAll?' done':'')+'" data-sig="1"><i style="width:'+sigPct+'%"></i></div>'
     +'<div class="card-b">'+body
       +'<div class="addbar">'
         +'<input class="grow" id="nmTitle" placeholder="Add a work task...">'
@@ -770,7 +815,15 @@ async function toggleMission(node,id,status){
   node.classList.toggle('done',nowDone);box.classList.toggle('done',nowDone);
   const rt=box.querySelector('.rt');if(rt)rt.classList.toggle('done',nowDone);
   node.setAttribute('onclick',"toggleMission(this,'"+id+"','"+(nowDone?'done':'pending')+"')");
+  updateMissionProg('card-mission');
   await sb.from('dc_missions').update({status:nowDone?'done':'pending',completed_at:nowDone?new Date().toISOString():null}).eq('id',id);
+}
+function updateMissionProg(cardId){
+  const c=el(cardId);if(!c)return;
+  const sig=c.querySelectorAll('.card-b .tbox:not(.noise)'), sd=c.querySelectorAll('.card-b .tbox:not(.noise).done');
+  const all=sig.length>0&&sd.length===sig.length, pct=sig.length?Math.round(sd.length/sig.length*100):0;
+  const cnt=c.querySelector('.count'); if(cnt){cnt.textContent=sd.length+'/'+sig.length+' signals'; cnt.classList.toggle('alldone',all);}
+  const bar=c.querySelector('.pbar[data-sig]'); if(bar){const i=bar.querySelector('i'); if(i)i.style.width=pct+'%'; bar.classList.toggle('done',all);}
 }
 async function moveMission(id){
   await sb.from('dc_missions').update({scheduled_date:addDays(state.date,1),status:'pending'}).eq('id',id);
@@ -781,8 +834,10 @@ async function deleteMission(id){
   await refreshMissions();
 }
 function updateCount(cardId){
-  const c=el(cardId);if(!c)return;const cnt=c.querySelector('.count');
-  if(cnt)cnt.textContent=c.querySelectorAll('.tbox.done').length+'/'+c.querySelectorAll('.tbox').length;
+  const c=el(cardId);if(!c)return;
+  const tot=c.querySelectorAll('.tbox').length, dn=c.querySelectorAll('.tbox.done').length, all=tot>0&&dn===tot;
+  const cnt=c.querySelector('.count'); if(cnt){cnt.textContent=dn+'/'+tot; cnt.classList.toggle('alldone',all);}
+  const bar=c.querySelector('.pbar'); if(bar){const i=bar.querySelector('i'); if(i)i.style.width=(tot?Math.round(dn/tot*100):0)+'%'; bar.classList.toggle('done',all);}
 }
 async function refreshTodo(){
   const c=el('card-todo');if(!c)return;
@@ -1223,7 +1278,11 @@ async function renderActiveWorkout(v){
   const logMap={}; logs.forEach(l=>{logMap[l.exercise_name+'#'+l.set_index]=l;});
   function lastFor(name){const rows=hist.filter(h=>h.exercise_name===name);if(!rows.length)return null;const sid=rows[0].session_id;return rows.filter(h=>h.session_id===sid).slice().reverse();}
 
+  const totalSets=exs.reduce((a,e)=>a+(e.target_sets||1),0);
+  const doneSets=logs.filter(l=>l.done).length;
+  const wkPct=totalSets?Math.round(doneSets/totalSets*100):0;
   let html='<div class="wktop"><div class="nm">'+esc(aw.name||'Workout')+'<small>Session in progress</small></div><div class="wktimer" id="sessTimer">00:00</div></div>';
+  html+='<div class="wkprogwrap"><div class="pbar" id="wkprog"><i style="width:'+wkPct+'%"></i></div><div class="wkproglab"><span id="wkproglab">'+doneSets+' / '+totalSets+' sets done</span></div></div>';
   html+='<div class="restbar"><span class="rl">Rest</span>'
     +[60,90,120].map(sec=>'<button class="restpreset'+(sec===restDefault?' active':'')+'" onclick="setRest('+sec+',this)">'+sec+'s</button>').join('')
     +'<button class="restpreset" onclick="startRest(restDefault)">Start</button>'
@@ -1267,6 +1326,12 @@ function startRest(sec){
   let left=sec;const e=el('restTimer');if(e){e.textContent=fmtDur(left);e.classList.add('run');}
   restTick=setInterval(()=>{left--;const e2=el('restTimer');if(e2)e2.textContent=left>0?fmtDur(left):'Go!';if(left<=0){clearInterval(restTick);restTick=null;if(e2)setTimeout(()=>{if(e2){e2.textContent='--:--';e2.classList.remove('run');}},2000);}},1000);
 }
+function updateWkProg(){
+  const rows=document.querySelectorAll('.setrow'), done=document.querySelectorAll('.setrow.done');
+  const bar=el('wkprog'); const lab=el('wkproglab');
+  if(bar){const i=bar.querySelector('i'); if(i)i.style.width=(rows.length?Math.round(done.length/rows.length*100):0)+'%';}
+  if(lab) lab.textContent=done.length+' / '+rows.length+' sets done';
+}
 async function logSet(btn){
   const row=btn.closest('.setrow');
   const ex=row.dataset.ex, idx=parseInt(row.dataset.idx);
@@ -1274,6 +1339,7 @@ async function logSet(btn){
   const r=row.querySelector('.r').value===''?null:parseInt(row.querySelector('.r').value);
   const nowDone=!row.classList.contains('done');
   row.classList.toggle('done',nowDone);
+  updateWkProg();
   if(row.dataset.logid){
     await sb.from('dc_set_logs').update({weight:w,reps:r,done:nowDone}).eq('id',row.dataset.logid);
   } else {
