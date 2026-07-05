@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- YouDo build: stripe-style theme -->
+<!-- YouDo build: joint calendar + auto daily tasks + Lewis rename -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -509,7 +509,7 @@ async function q(table){return sb.from(table);}
 
 // ===================== AUTH GATE =====================
 function applyAccount(a){state.account=a.id;state.full=a.full;}
-function accountLabel(id){return id==='lewis'?'Main Account':'Yasmin Account';}
+function accountLabel(id){return id==='lewis'?'Lewis Account':'Yasmin Account';}
 function partnerId(){return state.account==='lewis'?'yasmin':'lewis';}
 function partnerLabel(){return accountLabel(partnerId());}
 function checkGate(){
@@ -621,6 +621,7 @@ function isDue(r,d){
 }
 
 async function renderDashboard(v){
+  await ensureDailyTasks();
   await ensureTasksFor(state.date);
   const date=state.date;
   const [tasks,missions,vision] = await Promise.all([
@@ -1549,15 +1550,15 @@ function viewPhoto(url){
 // ===================== JOINT SHARED CALENDAR =====================
 // Weekly routine keyed by weekday (0=Sun..6=Sat): [start, end, title, owner_account]
 const ROUTINE={
-  1:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Main Account work block','main']],
-  2:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:15','Yasmin light filming block','yasmin'],['10:15','18:00','Main Account work block','main']],
-  3:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Main Account work block','main']],
-  4:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:15','Yasmin light filming block','yasmin'],['10:15','18:00','Main Account work block','main']],
-  5:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Main Account work block','main']],
-  6:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin gym','yasmin'],['10:30','11:30','Optional catch-up filming / admin','shared']],
-  0:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Main Account gym','main'],['10:30','11:30','Weekly reset / planning','shared']]
+  1:[['08:00','09:00','Lewis gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Lewis work block','main']],
+  2:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:15','Yasmin light filming block','yasmin'],['10:15','18:00','Lewis work block','main']],
+  3:[['08:00','09:00','Lewis gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Lewis work block','main']],
+  4:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:15','Yasmin light filming block','yasmin'],['10:15','18:00','Lewis work block','main']],
+  5:[['08:00','09:00','Lewis gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Lewis work block','main']],
+  6:[['08:00','09:00','Lewis gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin gym','yasmin'],['10:30','11:30','Optional catch-up filming / admin','shared']],
+  0:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Lewis gym','main'],['10:30','11:30','Weekly reset / planning','shared']]
 };
-function ownerLabel(o){return o==='yasmin'?'Yasmin Account':o==='shared'?'Shared':'Main Account';}
+function ownerLabel(o){return o==='yasmin'?'Yasmin':o==='shared'?'Shared':'Lewis';}
 function ownerTag(o){return o==='yasmin'?'relationship':o==='shared'?'supplement':'find_creators';}
 function setCalFilter(f){state.calFilter=f;navigate('calendar');}
 // Idempotent: generate routine events for the next 4 weeks. Unique auto_key + a
@@ -1585,7 +1586,7 @@ async function renderCalendar(v){
   const E=data||[];
   const f=state.calFilter||'all';
   const shown=f==='all'?E:E.filter(e=>(e.owner_account||'main')===f);
-  const filters=[['all','All'],['main','Main'],['yasmin','Yasmin'],['shared','Shared']];
+  const filters=[['all','All'],['main','Lewis'],['yasmin','Yasmin'],['shared','Shared']];
   const bar='<div class="calfilters">'+filters.map(x=>'<button class="calfilter'+(f===x[0]?' active':'')+'" onclick="setCalFilter(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>';
   let listHtml='';
   if(shown.length){
@@ -1614,7 +1615,7 @@ async function renderCalendar(v){
 async function openEventModal(id){
   let ev={title:'',event_date:todayStr(),start_time:'',end_time:'',owner_account:(state.account==='yasmin'?'yasmin':'main'),note:''};
   if(id){const {data}=await sb.from('dc_calendar_events').select('*').eq('id',id).single();if(data)ev=data;}
-  const owners=[['main','Main Account'],['yasmin','Yasmin Account'],['shared','Shared']];
+  const owners=[['main','Lewis Account'],['yasmin','Yasmin Account'],['shared','Shared']];
   const st=ev.start_time?ev.start_time.slice(0,5):'', en=ev.end_time?ev.end_time.slice(0,5):'';
   el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
     +'<div class="modal-h">'+(id?'Edit event':'New event')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
@@ -1639,29 +1640,97 @@ async function saveEvent(id){
 async function delEvent(id){if(!confirm('Delete this event? It is removed for both accounts.'))return;await sb.from('dc_calendar_events').delete().eq('id',id);closeModal();navigate('calendar');}
 
 // ===================== STANDARD TO-DO (Yasmin account) =====================
+// Yasmin daily routine [type,title,category]
+const YAS_ROUTINE={
+  1:[['breakfast','Breakfast','Breakfast'],['filming','Film TikTok videos -- main filming block','Filming']],
+  2:[['gym','Gym','Gym'],['breakfast','Breakfast','Breakfast'],['filming','Film TikTok videos -- light filming block','Filming']],
+  3:[['breakfast','Breakfast','Breakfast'],['filming','Film TikTok videos -- main filming block','Filming']],
+  4:[['gym','Gym','Gym'],['breakfast','Breakfast','Breakfast'],['filming','Film TikTok videos -- light filming block','Filming']],
+  5:[['breakfast','Breakfast','Breakfast'],['filming','Film TikTok videos -- main filming block','Filming']],
+  6:[['gym','Gym','Gym'],['breakfast','Breakfast','Breakfast'],['filming','Optional catch-up filming / admin','Admin']],
+  0:[['gym','Gym','Gym'],['breakfast','Breakfast','Breakfast'],['reset','Weekly reset / planning','Personal']]
+};
+// Lewis daily checklist routine (dc_tasks) [type,title,category-class]
+const LEWIS_ROUTINE={
+  1:[['gym','Gym','workout'],['breakfast','Breakfast','food'],['watchson','Watch our son while Yasmin films','relationship']],
+  2:[['breakfast','Breakfast','food'],['watchson','Watch our son while Yasmin goes to the gym','relationship'],['work','Work block / normal workday','admin']],
+  3:[['gym','Gym','workout'],['breakfast','Breakfast','food'],['watchson','Watch our son while Yasmin films','relationship']],
+  4:[['breakfast','Breakfast','food'],['watchson','Watch our son while Yasmin goes to the gym','relationship'],['work','Work block / normal workday','admin']],
+  5:[['gym','Gym','workout'],['breakfast','Breakfast','food'],['watchson','Watch our son while Yasmin films','relationship']],
+  6:[['gym','Gym','workout'],['breakfast','Breakfast','food'],['watchson','Watch our son while Yasmin goes to the gym','relationship'],['admin','Optional admin / catch-up','admin']],
+  0:[['gym','Gym','workout'],['breakfast','Breakfast','food'],['reset','Weekly reset / planning','other']]
+};
+// Idempotent daily task generation for BOTH accounts (next 14 days). Unique
+// auto_key (account|date|type) + a localStorage horizon prevent duplicates and
+// stop deleted tasks from being resurrected.
+async function ensureDailyTasks(){
+  const today=todayStr(), horizon=addDays(today,14);
+  let from=today;
+  const last=localStorage.getItem('dc_dailytasks_through');
+  if(last && last>=today) from=addDays(last,1);
+  if(from>horizon) return;
+  const yrows=[], lrows=[];
+  for(let ds=from; ds<=horizon; ds=addDays(ds,1)){
+    const d=dow(ds);
+    for(const s of (YAS_ROUTINE[d]||[])) yrows.push({owner:'yasmin',title:s[1],category:s[2],due_date:ds,source:'auto-schedule',auto_key:'yasmin|'+ds+'|'+s[0]});
+    for(const s of (LEWIS_ROUTINE[d]||[])) lrows.push({title:s[1],category:s[2],scheduled_date:ds,source:'auto-schedule',auto_key:'lewis|'+ds+'|'+s[0]});
+  }
+  if(yrows.length) await sb.from('dc_todos').upsert(yrows,{onConflict:'auto_key',ignoreDuplicates:true});
+  if(lrows.length) await sb.from('dc_tasks').upsert(lrows,{onConflict:'auto_key',ignoreDuplicates:true});
+  localStorage.setItem('dc_dailytasks_through',horizon);
+}
+function catTag(cat){const map={gym:'workout',breakfast:'food',filming:'advertisements',admin:'admin',personal:'relationship'};return map[(cat||'').toLowerCase()]||'admin';}
 async function renderTodo(v){
-  const {data}=await sb.from('dc_todos').select('*').eq('owner',state.account).order('done').order('sort_order').order('created_at');
-  const L=data||[];
-  const done=L.filter(x=>x.done).length;
-  const rows=L.length?L.map(x=>
-    '<div class="tbox '+(x.done?'done':'')+'">'
-    +'<div class="chk '+(x.done?'done':'')+'" onclick="toggleTodo(this,\''+x.id+'\','+(x.done?'true':'false')+')">'+svg(I.check)+'</div>'
-    +'<div class="rt '+(x.done?'done':'')+'"><div class="t">'+esc(x.title)+'</div></div>'
-    +'<button class="btn ghost sm" title="Delete" onclick="delTodo(\''+x.id+'\')">'+svg(I.trash,'')+'</button>'
-    +'</div>').join('') : '<div class="empty">No to-dos yet. Add your first one below.</div>';
-  const pct=L.length?Math.round(done/L.length*100):0, all=L.length&&done===L.length;
-  let html='<div class="card" id="card-todo"><div class="card-h">'+svg(I.list,'ic')+'<h2>My To-Do</h2><span class="count'+(all?' alldone':'')+'">'+done+'/'+L.length+'</span></div>'
+  await ensureDailyTasks();
+  const {data}=await sb.from('dc_todos').select('*').eq('owner',state.account).order('due_date',{nullsFirst:true}).order('done').order('task_time',{nullsFirst:true}).order('created_at');
+  const L=data||[];const today=todayStr();
+  const todays=L.filter(x=>!x.due_date||x.due_date===today);
+  const upcoming=L.filter(x=>x.due_date&&x.due_date>today);
+  function trow(x){
+    return '<div class="tbox '+(x.done?'done':'')+'">'
+      +'<div class="chk '+(x.done?'done':'')+'" onclick="toggleTodo(this,\''+x.id+'\','+(x.done?'true':'false')+')">'+svg(I.check)+'</div>'
+      +'<div class="rt '+(x.done?'done':'')+'"><div class="t">'+esc(x.title)+'</div>'
+        +((x.category||x.task_time||x.source==='auto-schedule')?'<div class="m">'+(x.category?'<span class="tag '+catTag(x.category)+'">'+esc(x.category)+'</span>':'')+(x.task_time?'<span>'+fmtTime(x.task_time)+'</span>':'')+(x.source==='auto-schedule'?'<span class="tag admin">Auto</span>':'')+'</div>':'')
+      +'</div>'
+      +'<div class="row-acts" style="opacity:1"><button class="btn ghost sm" title="Edit" onclick="openTodoModal(\''+x.id+'\')">'+svg(I.pencil,'')+'</button>'
+      +'<button class="btn ghost sm" title="Delete" onclick="delTodo(\''+x.id+'\')">'+svg(I.trash,'')+'</button></div>'
+    +'</div>';
+  }
+  const dt=todays.filter(x=>x.done).length, pct=todays.length?Math.round(dt/todays.length*100):0, all=todays.length&&dt===todays.length;
+  let html='<div class="card" id="card-todo"><div class="card-h">'+svg(I.list,'ic')+'<h2>My To-Do</h2>'
+      +'<span class="count'+(all?' alldone':'')+'">'+dt+'/'+todays.length+'</span>'
+      +'<button class="btn primary sm" style="margin-left:8px" onclick="openTodoModal()">'+svg(I.plus,'')+' Add</button></div>'
     +'<div class="pbar'+(all?' done':'')+'"><i style="width:'+pct+'%"></i></div>'
-    +'<div class="card-b">'+rows
-      +'<div class="addbar"><input class="grow" id="ntTodo" placeholder="Add a to-do..."><button class="btn primary full" onclick="addTodo()">'+svg(I.plus,'')+' Add</button></div>'
+    +'<div class="card-b"><div class="section-title">Today</div>'
+      +(todays.length?todays.map(trow).join(''):'<div class="empty">Nothing for today yet.</div>')
+      +(upcoming.length?'<div class="section-title">Upcoming</div>'+upcoming.map(trow).join(''):'')
     +'</div></div>';
-  html+='<div style="height:18px"></div>'+await mainNeedsCard();
+  html+='<div style="height:18px"></div>'+await lewisNeedsCard();
   v.innerHTML=html;
 }
-async function addTodo(){
-  const t=el('ntTodo').value.trim();if(!t)return;
-  await sb.from('dc_todos').insert({owner:state.account,title:t,sort_order:Date.now()%100000});
-  el('ntTodo').value='';navigate('todo');
+async function openTodoModal(id){
+  let x={title:'',due_date:todayStr(),task_time:'',category:'Personal',note:''};
+  if(id){const {data}=await sb.from('dc_todos').select('*').eq('id',id).single();if(data)x=data;}
+  const cats=['Gym','Filming','Breakfast','Admin','Personal'];
+  const tt=x.task_time?x.task_time.slice(0,5):'';
+  el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
+    +'<div class="modal-h">'+(id?'Edit task':'New task')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b">'
+      +'<div class="field"><label>Task</label><input id="tdTitle" value="'+esc(x.title||'')+'"></div>'
+      +'<div class="field"><label>Date</label><input id="tdDate" type="date" value="'+(x.due_date||todayStr())+'"></div>'
+      +'<div class="field"><label>Time (optional)</label><input id="tdTime" type="time" value="'+tt+'"></div>'
+      +'<div class="field"><label>Category</label><select id="tdCat">'+cats.map(c=>'<option'+(((x.category||'Personal')===c)?' selected':'')+'>'+c+'</option>').join('')+'</select></div>'
+      +'<div class="field"><label>Notes (optional)</label><textarea id="tdNote" rows="2">'+esc(x.note||'')+'</textarea></div>'
+    +'</div>'
+    +'<div class="modal-f">'+(id?'<button class="btn" style="margin-right:auto" onclick="delTodo(\''+id+'\')">Delete</button>':'')+'<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveTodo('+(id?'\''+id+'\'':'null')+')">Save</button></div>'
+  +'</div></div>';
+}
+async function saveTodo(id){
+  const t=el('tdTitle').value.trim();if(!t){toast('Add a task');return;}
+  const row={title:t,due_date:el('tdDate').value||todayStr(),task_time:el('tdTime').value||null,category:el('tdCat').value,note:el('tdNote').value||null};
+  if(id){await sb.from('dc_todos').update(row).eq('id',id);}
+  else{row.owner=state.account;row.source='manual';row.sort_order=Date.now()%100000;await sb.from('dc_todos').insert(row);}
+  closeModal();navigate('todo');
 }
 async function toggleTodo(node,id,done){
   const nowDone=!(done===true||done==='true');
@@ -1671,10 +1740,10 @@ async function toggleTodo(node,id,done){
   updateCount('card-todo');
   await sb.from('dc_todos').update({done:nowDone}).eq('id',id);
 }
-async function delTodo(id){await sb.from('dc_todos').delete().eq('id',id);navigate('todo');}
+async function delTodo(id){await sb.from('dc_todos').delete().eq('id',id);closeModal();navigate('todo');}
 
-// read-only: what the Main account needs to do today (missions + routine tasks)
-async function mainNeedsCard(){
+// read-only: what the Lewis account needs to do today (missions + daily tasks)
+async function lewisNeedsCard(){
   const today=todayStr();
   const [ms,ts]=await Promise.all([
     sb.from('dc_missions').select('title,priority,status').eq('scheduled_date',today).neq('status','done').order('priority'),
@@ -1683,9 +1752,9 @@ async function mainNeedsCard(){
   const missions=ms.data||[], tasks=ts.data||[];
   let body='';
   if(missions.length) body+='<div class="section-title">Missions (Signal / Noise)</div>'+missions.map(m=>'<div class="tbox" style="opacity:.92"><div class="rt"><div class="t">'+esc(m.title)+'</div></div><span class="tag '+(m.priority==='signal'?'find_creators':'admin')+'">'+(m.priority==='signal'?'Signal':'Noise')+'</span></div>').join('');
-  if(tasks.length) body+='<div class="section-title">Routines</div>'+tasks.map(t=>'<div class="tbox" style="opacity:.92"><div class="rt"><div class="t">'+esc(t.title)+'</div></div><span class="tag '+t.category+'">'+titleCase(t.category)+'</span></div>').join('');
-  if(!body) body='<div class="empty">Nothing outstanding on the Main account right now.</div>';
-  return '<div class="card"><div class="card-h">'+svg(I.target,'ic')+'<h2>What Main needs to do today</h2></div><div class="card-b">'+body+'</div></div>';
+  if(tasks.length) body+='<div class="section-title">Daily tasks</div>'+tasks.map(t=>'<div class="tbox" style="opacity:.92"><div class="rt"><div class="t">'+esc(t.title)+'</div></div><span class="tag '+t.category+'">'+titleCase(t.category)+'</span></div>').join('');
+  if(!body) body='<div class="empty">Nothing outstanding on Lewis Account right now.</div>';
+  return '<div class="card"><div class="card-h">'+svg(I.target,'ic')+'<h2>What Lewis needs to do today</h2></div><div class="card-b">'+body+'</div></div>';
 }
 
 // ===================== WIRE UP =====================
@@ -1700,7 +1769,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
   addFood,addWeight,delWeight,viewPhoto,weightPhotoPicked,
-  setCalFilter,openEventModal,closeModal,saveEvent,delEvent,addTodo,toggleTodo,delTodo,tryUnlock,lock});
+  setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,tryUnlock,lock});
 </script>
 <script>
 (new Function(document.getElementById('app-script').textContent)).call(window);
