@@ -214,6 +214,9 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .coachbtns{display:flex;flex-wrap:wrap;gap:8px}
 .coachout{margin-top:14px;background:#f7f7f6;border:1px solid var(--line);border-radius:10px;padding:14px 16px;white-space:pre-wrap;font-size:14px;line-height:1.6}
 .coachout.thinking{color:var(--muted);font-style:italic}
+.calfilters{display:flex;gap:8px;flex-wrap:wrap;margin:2px 4px 12px}
+.calfilter{border:1px solid var(--line2);background:#fff;border-radius:20px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;color:#54617a}
+.calfilter.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 /* weight tracker */
 .wthumb{width:50px;height:50px;flex:0 0 50px;border-radius:10px;object-fit:cover;cursor:zoom-in;background:#f0f0ef;border:1px solid var(--line)}
 .wthumb.noimg{display:flex;align-items:center;justify-content:center;color:#c9c9c6;cursor:default}
@@ -483,7 +486,7 @@ const I = {
 function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
 // ===================== STATE =====================
-const state = { view:'dashboard', date:todayStr(), settings:null, account:'lewis', full:true };
+const state = { view:'dashboard', date:todayStr(), settings:null, account:'lewis', full:true, calFilter:'all' };
 
 // ===================== HELPERS =====================
 function todayStr(){const d=new Date();return ymd(d);}
@@ -1543,59 +1546,97 @@ function viewPhoto(url){
   document.body.appendChild(lb);
 }
 
-// ===================== SHARED CALENDAR =====================
+// ===================== JOINT SHARED CALENDAR =====================
+// Weekly routine keyed by weekday (0=Sun..6=Sat): [start, end, title, owner_account]
+const ROUTINE={
+  1:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Main Account work block','main']],
+  2:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:15','Yasmin light filming block','yasmin'],['10:15','18:00','Main Account work block','main']],
+  3:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Main Account work block','main']],
+  4:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:15','Yasmin light filming block','yasmin'],['10:15','18:00','Main Account work block','main']],
+  5:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin filming block','yasmin'],['10:30','18:00','Main Account work block','main']],
+  6:[['08:00','09:00','Main Account gym','main'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Yasmin gym','yasmin'],['10:30','11:30','Optional catch-up filming / admin','shared']],
+  0:[['08:00','09:00','Yasmin gym','yasmin'],['09:00','09:30','Breakfast together','shared'],['09:30','10:30','Main Account gym','main'],['10:30','11:30','Weekly reset / planning','shared']]
+};
+function ownerLabel(o){return o==='yasmin'?'Yasmin Account':o==='shared'?'Shared':'Main Account';}
+function ownerTag(o){return o==='yasmin'?'relationship':o==='shared'?'supplement':'find_creators';}
+function setCalFilter(f){state.calFilter=f;navigate('calendar');}
+// Idempotent: generate routine events for the next 4 weeks. Unique auto_key + a
+// localStorage horizon mean running it repeatedly never duplicates and does not
+// resurrect events you have manually deleted.
+async function ensureRoutineEvents(){
+  const today=todayStr(), horizon=addDays(today,28);
+  let fromDate=today;
+  const last=localStorage.getItem('dc_routine_through');
+  if(last && last>=today) fromDate=addDays(last,1);
+  if(fromDate>horizon) return;
+  const rows=[];
+  for(let ds=fromDate; ds<=horizon; ds=addDays(ds,1)){
+    for(const s of (ROUTINE[dow(ds)]||[])){
+      rows.push({title:s[2],event_date:ds,start_time:s[0],end_time:s[1],owner_account:s[3],source:'auto-schedule',created_by:'system',auto_key:ds+'|'+s[0]+'|'+s[2]});
+    }
+  }
+  if(rows.length) await sb.from('dc_calendar_events').upsert(rows,{onConflict:'auto_key',ignoreDuplicates:true});
+  localStorage.setItem('dc_routine_through',horizon);
+}
 async function renderCalendar(v){
-  const {data}=await sb.from('dc_calendar_events').select('*').gte('event_date',todayStr()).order('event_date').order('start_time',{nullsFirst:true});
+  await ensureRoutineEvents();
+  const from=todayStr(), to=addDays(from,28);
+  const {data}=await sb.from('dc_calendar_events').select('*').gte('event_date',from).lte('event_date',to).order('event_date').order('start_time',{nullsFirst:true});
   const E=data||[];
+  const f=state.calFilter||'all';
+  const shown=f==='all'?E:E.filter(e=>(e.owner_account||'main')===f);
+  const filters=[['all','All'],['main','Main'],['yasmin','Yasmin'],['shared','Shared']];
+  const bar='<div class="calfilters">'+filters.map(x=>'<button class="calfilter'+(f===x[0]?' active':'')+'" onclick="setCalFilter(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>';
   let listHtml='';
-  if(E.length){
+  if(shown.length){
     let cur=null;
-    E.forEach(e=>{
+    shown.forEach(e=>{
       if(e.event_date!==cur){cur=e.event_date;listHtml+='<div class="section-title">'+prettyDate(e.event_date)+'</div>';}
-      const who=e.created_by==='yasmin'?'Yasmin':'Main';
+      const o=e.owner_account||'main';
       listHtml+='<div class="tbox">'
         +'<div class="rt"><div class="t">'+esc(e.title)+'</div><div class="m">'
-          +(e.start_time?'<span>'+svg(I.clock,'')+' '+fmtTime(e.start_time)+(e.end_time?' - '+fmtTime(e.end_time):'')+'</span>':'')
-          +'<span class="tag '+(e.created_by==='yasmin'?'relationship':'find_creators')+'">'+who+'</span>'
+          +(e.start_time?'<span>'+fmtTime(e.start_time)+(e.end_time?' - '+fmtTime(e.end_time):'')+'</span>':'')
+          +'<span class="tag '+ownerTag(o)+'">'+ownerLabel(o)+'</span>'
+          +(e.source==='auto-schedule'?'<span class="tag admin">Auto</span>':'')
           +(e.note?'<span>'+esc(e.note)+'</span>':'')
         +'</div></div>'
-        +'<button class="btn ghost sm" title="Delete" onclick="delEvent(\''+e.id+'\')">'+svg(I.trash,'')+'</button>'
+        +'<div class="row-acts" style="opacity:1">'
+          +'<button class="btn ghost sm" title="Edit" onclick="openEventModal(\''+e.id+'\')">'+svg(I.pencil,'')+'</button>'
+          +'<button class="btn ghost sm" title="Delete" onclick="delEvent(\''+e.id+'\')">'+svg(I.trash,'')+'</button>'
+        +'</div>'
       +'</div>';
     });
-  } else listHtml='<div class="empty">No upcoming events. Add one below -- it is shared with both accounts.</div>';
-  const addCard='<div class="card"><div class="card-h">'+svg(I.cal,'ic')+'<h2>Shared calendar</h2><span class="count">both accounts</span></div><div class="card-b">'+listHtml
-    +'<div class="addbar">'
-      +'<input class="grow" id="ceTitle" placeholder="Event title (e.g. Date night, Dentist)">'
-      +'<div class="inrow"><input id="ceDate" type="date" value="'+todayStr()+'" class="grow"><input id="ceStart" type="time" class="grow"><input id="ceEnd" type="time" class="grow"></div>'
-      +'<input class="grow" id="ceNote" placeholder="Note (optional)">'
-      +'<button class="btn primary full" onclick="addEvent()">'+svg(I.plus,'')+' Add to shared calendar</button>'
+  } else listHtml='<div class="empty">No events for this filter.</div>';
+  v.innerHTML='<div class="card"><div class="card-h">'+svg(I.cal,'ic')+'<h2>Shared calendar</h2>'
+    +'<button class="btn primary sm" style="margin-left:auto" onclick="openEventModal()">'+svg(I.plus,'')+' Add event</button></div>'
+    +'<div class="card-b">'+bar+listHtml+'</div></div>';
+}
+async function openEventModal(id){
+  let ev={title:'',event_date:todayStr(),start_time:'',end_time:'',owner_account:(state.account==='yasmin'?'yasmin':'main'),note:''};
+  if(id){const {data}=await sb.from('dc_calendar_events').select('*').eq('id',id).single();if(data)ev=data;}
+  const owners=[['main','Main Account'],['yasmin','Yasmin Account'],['shared','Shared']];
+  const st=ev.start_time?ev.start_time.slice(0,5):'', en=ev.end_time?ev.end_time.slice(0,5):'';
+  el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
+    +'<div class="modal-h">'+(id?'Edit event':'New event')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b">'
+      +'<div class="field"><label>Title</label><input id="evTitle" value="'+esc(ev.title||'')+'"></div>'
+      +'<div class="field"><label>Date</label><input id="evDate" type="date" value="'+(ev.event_date||todayStr())+'"></div>'
+      +'<div class="field"><label>Time</label><div class="two"><input id="evStart" type="time" value="'+st+'"><input id="evEnd" type="time" value="'+en+'"></div></div>'
+      +'<div class="field"><label>Account</label><select id="evOwner">'+owners.map(x=>'<option value="'+x[0]+'"'+((ev.owner_account||'main')===x[0]?' selected':'')+'>'+x[1]+'</option>').join('')+'</select></div>'
+      +'<div class="field"><label>Notes (optional)</label><textarea id="evNote" rows="2">'+esc(ev.note||'')+'</textarea></div>'
     +'</div>'
+    +'<div class="modal-f">'+(id?'<button class="btn" style="margin-right:auto" onclick="delEvent(\''+id+'\')">Delete</button>':'')+'<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveEvent('+(id?'\''+id+'\'':'null')+')">Save</button></div>'
   +'</div></div>';
-  v.innerHTML='<div class="cal-wrap">'+addCard+await partnerCard()+'</div>';
 }
-async function addEvent(){
-  const t=el('ceTitle').value.trim();if(!t)return;
-  await sb.from('dc_calendar_events').insert({title:t,event_date:el('ceDate').value||todayStr(),start_time:el('ceStart').value||null,end_time:el('ceEnd').value||null,note:el('ceNote').value||null,created_by:state.account});
-  el('ceTitle').value='';el('ceNote').value='';toast('Added to shared calendar');navigate('calendar');
+function closeModal(){el('modalRoot').innerHTML='';}
+async function saveEvent(id){
+  const t=el('evTitle').value.trim();if(!t){toast('Add a title');return;}
+  const row={title:t,event_date:el('evDate').value||todayStr(),start_time:el('evStart').value||null,end_time:el('evEnd').value||null,owner_account:el('evOwner').value,note:el('evNote').value||null};
+  if(id){await sb.from('dc_calendar_events').update(row).eq('id',id);}
+  else{row.source='manual';row.created_by=state.account;await sb.from('dc_calendar_events').insert(row);}
+  closeModal();toast('Saved');navigate('calendar');
 }
-async function delEvent(id){if(!confirm('Delete this shared event?'))return;await sb.from('dc_calendar_events').delete().eq('id',id);navigate('calendar');}
-
-// read-only snapshot of the OTHER account (Main sees Yasmin / Yasmin sees Main)
-async function partnerCard(){
-  const pid=partnerId();
-  const wk=(await sb.from('dc_workout_sessions').select('name,session_date,duration_sec').eq('owner',pid).eq('completed',true).order('session_date',{ascending:false}).limit(1)).data||[];
-  let itemsHtml;
-  if(pid==='yasmin'){
-    const td=(await sb.from('dc_todos').select('title').eq('owner','yasmin').eq('done',false).order('sort_order').limit(6)).data||[];
-    itemsHtml = td.length? '<div class="section-title">Her open to-dos</div>'+td.map(x=>'<div class="tbox" style="opacity:.92"><div class="rt"><div class="t">'+esc(x.title)+'</div></div></div>').join('') : '<div class="empty" style="padding:10px">No open to-dos.</div>';
-  } else {
-    const ms=(await sb.from('dc_missions').select('title,priority').eq('scheduled_date',todayStr()).neq('status','done').order('priority').limit(6)).data||[];
-    itemsHtml = ms.length? '<div class="section-title">On his list today</div>'+ms.map(m=>'<div class="tbox" style="opacity:.92"><div class="rt"><div class="t">'+esc(m.title)+'</div></div><span class="tag '+(m.priority==='signal'?'find_creators':'admin')+'">'+(m.priority==='signal'?'Signal':'Noise')+'</span></div>').join('') : '<div class="empty" style="padding:10px">Nothing outstanding.</div>';
-  }
-  const last=wk[0];
-  const wkHtml=last? '<div class="tbox" style="opacity:.92"><div class="rt"><div class="t">'+esc(last.name||'Workout')+'</div><div class="m"><span>'+shortDate(last.session_date)+'</span><span>'+fmtDur(last.duration_sec||0)+'</span></div></div></div>' : '<div class="empty" style="padding:10px">No workouts logged yet.</div>';
-  return '<div class="card"><div class="card-h">'+svg(I.dumbbell,'ic')+'<h2>'+partnerLabel()+'</h2></div><div class="card-b"><div class="section-title">Last workout</div>'+wkHtml+itemsHtml+'</div></div>';
-}
+async function delEvent(id){if(!confirm('Delete this event? It is removed for both accounts.'))return;await sb.from('dc_calendar_events').delete().eq('id',id);closeModal();navigate('calendar');}
 
 // ===================== STANDARD TO-DO (Yasmin account) =====================
 async function renderTodo(v){
@@ -1659,7 +1700,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
   addFood,addWeight,delWeight,viewPhoto,weightPhotoPicked,
-  addEvent,delEvent,addTodo,toggleTodo,delTodo,tryUnlock,lock});
+  setCalFilter,openEventModal,closeModal,saveEvent,delEvent,addTodo,toggleTodo,delTodo,tryUnlock,lock});
 </script>
 <script>
 (new Function(document.getElementById('app-script').textContent)).call(window);
