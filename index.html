@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- YouDo build: joint calendar + auto daily tasks + Lewis rename -->
+<!-- YouDo build: calendar mine-default filter -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -486,7 +486,7 @@ const I = {
 function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
 // ===================== STATE =====================
-const state = { view:'dashboard', date:todayStr(), settings:null, account:'lewis', full:true, calFilter:'all' };
+const state = { view:'dashboard', date:todayStr(), settings:null, account:'lewis', full:true, calFilter:'mine' };
 
 // ===================== HELPERS =====================
 function todayStr(){const d=new Date();return ymd(d);}
@@ -1584,9 +1584,12 @@ async function renderCalendar(v){
   const from=todayStr(), to=addDays(from,28);
   const {data}=await sb.from('dc_calendar_events').select('*').gte('event_date',from).lte('event_date',to).order('event_date').order('start_time',{nullsFirst:true});
   const E=data||[];
-  const f=state.calFilter||'all';
-  const shown=f==='all'?E:E.filter(e=>(e.owner_account||'main')===f);
-  const filters=[['all','All'],['main','Lewis'],['yasmin','Yasmin'],['shared','Shared']];
+  const myOwner=state.account==='yasmin'?'yasmin':'main';
+  const f=state.calFilter||'mine';
+  const shown = f==='all' ? E
+    : f==='mine' ? E.filter(e=>{const o=e.owner_account||'main';return o===myOwner||o==='shared';})
+    : E.filter(e=>(e.owner_account||'main')===f);
+  const filters=[['mine','Mine'],['all','All'],['main','Lewis'],['yasmin','Yasmin'],['shared','Shared']];
   const bar='<div class="calfilters">'+filters.map(x=>'<button class="calfilter'+(f===x[0]?' active':'')+'" onclick="setCalFilter(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>';
   let listHtml='';
   if(shown.length){
