@@ -568,7 +568,7 @@ const NAVS=[
   {k:'calendar',t:'Calendar',i:I.cal},
   {k:'roadmap',t:'Roadmap',i:I.board},
   {k:'todo',t:'To-Do',i:I.list},
-  {k:'food',t:'Food & Calories',i:I.food}
+  {k:'food',t:'Food tracker',i:I.food}
 ];
 function buildNav(){
   const allow = state.full ? ['dashboard','workouts','weight','roadmap','food'] : ['workouts','weight','todo'];
@@ -589,7 +589,7 @@ function renderDayNav(){
 function shiftDay(n){state.date=addDays(state.date,n);navigate(state.view);}
 function goToday(){state.date=todayStr();navigate(state.view);}
 
-const TITLES={dashboard:'Dashboard',time:'Time-blocking',workouts:'Workouts',weight:'Weight',calendar:'Calendar',roadmap:'Roadmap',todo:'To-Do',food:'Food & Calories'};
+const TITLES={dashboard:'Dashboard',time:'Time-blocking',workouts:'Workouts',weight:'Weight',calendar:'Calendar',roadmap:'Roadmap',todo:'To-Do',food:'Food tracker'};
 async function navigate(k){
   clearWorkoutTimers();
   if(!state.full && !['workouts','weight','todo'].includes(k)) k='workouts'; // limited account allowed views
@@ -823,13 +823,12 @@ async function analyticsCard(){
   const last=ymd(new Date(now.getFullYear(),now.getMonth()+1,0));
   const [w,f]=await Promise.all([
     sb.from('dc_workout_sessions').select('duration_sec,completed').gte('session_date',first).lte('session_date',last).eq('completed',true),
-    sb.from('dc_food').select('log_date,calories').gte('log_date',first).lte('log_date',last)
+    sb.from('dc_nutrition_days').select('meal_date,calories,calorie_goal').gte('meal_date',first).lte('meal_date',last)
   ]);
   const workouts=(w.data||[]).length;
   const wkMins=Math.round((w.data||[]).reduce((a,b)=>a+(b.duration_sec||0),0)/60);
-  const byDay={};(f.data||[]).forEach(r=>byDay[r.log_date]=(byDay[r.log_date]||0)+(r.calories||0));
-  const tgt=state.settings.cal_target||2200;const lo=tgt*0.9,hi=tgt*1.1;
-  const hitDays=Object.values(byDay).filter(c=>c>=lo&&c<=hi).length;
+  const tgt=state.settings.cal_target||2200;
+  const hitDays=(f.data||[]).filter(r=>{const c=Number(r.calories)||0;const g=Number(r.calorie_goal)||tgt;return c>=g*0.9&&c<=g*1.1;}).length;
   const monthName=now.toLocaleDateString('en-US',{month:'long'});
   return '<div class="card">'
     +'<div class="card-h">'+svg(I.dash,'ic')+'<h2>This month &middot; '+monthName+'</h2></div>'
@@ -1121,10 +1120,10 @@ async function computeNudges(T,M){
   if(sig.length&&sig.every(m=>m.status==='done')) out.push({warn:false,t:'All signals cleared. Strong day -- noise is fair game now.'});
   else if(sig.length&&h>=12&&!sig.some(m=>m.status==='done')) out.push({warn:true,t:'It is past noon and no signal is done yet. Protect your focus -- start the one that matters.'});
   // meals
-  const {data:food}=await sb.from('dc_food').select('meal').eq('log_date',state.date);
-  const meals=new Set((food||[]).map(x=>x.meal));
-  if(h>=14&&!meals.has('lunch')) out.push({warn:true,t:'No lunch logged yet. Tap Food to keep your calorie tracking honest.'});
-  if(h>=20&&!meals.has('dinner')) out.push({warn:true,t:'Dinner not logged. Quick add it before the day closes.'});
+  const {data:food}=await sb.from('dc_nutrition_meals').select('meal_type').eq('meal_date',state.date);
+  const meals=new Set((food||[]).map(x=>(x.meal_type||'').toLowerCase()));
+  if(h>=14&&!meals.has('lunch')) out.push({warn:true,t:'No lunch synced yet. Check the Food tracker to keep things honest.'});
+  if(h>=20&&!meals.has('dinner')) out.push({warn:true,t:'Dinner not synced. Log it in your nutrition app before the day closes.'});
   // workout
   const woTask=T.find(t=>t.category==='workout'&&t.status==='pending');
   const {data:wo}=await sb.from('dc_workouts').select('id').eq('workout_date',state.date);
@@ -1464,47 +1463,44 @@ async function askCoach(scope,btn){
 }
 
 // ===================== FOOD =====================
+// Read-only Food tracker: mirrors data synced from the nutrition tracker connector.
 async function renderFood(v){
   const date=state.date;const s=state.settings;
-  const {data}=await sb.from('dc_food').select('*').eq('log_date',date).order('created_at');
-  const F=data||[];
-  const sum=k=>F.reduce((a,b)=>a+(b[k]||0),0);
-  const cal=sum('calories'),pro=sum('protein'),carb=sum('carbs'),fat=sum('fat');
+  const [dayR,mealsR]=await Promise.all([
+    sb.from('dc_nutrition_days').select('*').eq('meal_date',date).maybeSingle(),
+    sb.from('dc_nutrition_meals').select('*').eq('meal_date',date).order('at_time',{nullsFirst:true}).order('synced_at')
+  ]);
+  const day=dayR.data;const meals=mealsR.data||[];
+  const sum=k=>meals.reduce((a,b)=>a+(Number(b[k])||0),0);
+  const num=(a,b)=>(a!=null&&a!=='')?Number(a):b;
+  const cal=day?num(day.calories,sum('calories')):sum('calories');
+  const pro=day?num(day.protein,sum('protein')):sum('protein');
+  const carb=day?num(day.carbs,sum('carbs')):sum('carbs');
+  const fat=day?num(day.fat,sum('fat')):sum('fat');
+  const calGoal=num(day&&day.calorie_goal,s.cal_target)||1;
+  const proGoal=num(day&&day.protein_goal,s.protein_target)||1;
+  const carbGoal=num(day&&day.carbs_goal,s.carbs_target)||1;
+  const fatGoal=num(day&&day.fat_goal,s.fat_target)||1;
   function bar(lab,val,tgt,unit){const pct=tgt?Math.min(100,Math.round(val/tgt*100)):0;
-    return '<div class="macro"><div class="lab"><span>'+lab+'</span><span>'+val+' / '+tgt+unit+'</span></div><div class="prog"><i style="width:'+pct+'%"></i></div></div>';}
-  const meals=['breakfast','lunch','dinner','snack'];
-  const mealBlocks=meals.map(m=>{
-    const items=F.filter(x=>x.meal===m);
-    if(!items.length)return '';
-    return '<div class="section-title">'+titleCase(m)+'</div>'+items.map(x=>
-      '<div class="row"><div class="rt"><div class="t">'+esc(x.name)+'</div><div class="m">'+x.calories+' kcal &middot; P'+x.protein+' C'+x.carbs+' F'+x.fat+'</div></div>'
-      +'<button class="btn ghost sm" onclick="delRow(\'dc_food\',\''+x.id+'\')">'+svg(I.trash,'')+'</button></div>').join('');
-  }).join('');
+    return '<div class="macro"><div class="lab"><span>'+lab+'</span><span>'+Math.round(val)+' / '+Math.round(tgt)+unit+'</span></div><div class="prog"><i style="width:'+pct+'%"></i></div></div>';}
+  const mealList=meals.length?meals.map(x=>
+    '<div class="tbox"><div class="rt"><div class="t">'+esc(x.name||'Meal')+'</div><div class="m">'
+      +(x.meal_type?'<span class="tag food">'+esc(titleCase(x.meal_type))+'</span>':'')
+      +'<span>'+Math.round(Number(x.calories)||0)+' kcal</span>'
+      +'<span>P'+Math.round(Number(x.protein)||0)+' C'+Math.round(Number(x.carbs)||0)+' F'+Math.round(Number(x.fat)||0)+'</span>'
+    +'</div></div></div>').join('')
+    :'<div class="empty">No meals synced for this day yet. Your nutrition tracker data will appear here automatically.</div>';
+  const syncTs=(day&&day.synced_at)||(meals[0]&&meals[0].synced_at);
+  const synced=syncTs?'Last synced '+new Date(syncTs).toLocaleString():'Not synced yet';
   v.innerHTML='<div class="food-wrap">'
     +'<div class="card"><div class="card-h">'+svg(I.target,'ic')+'<h2>Today vs goals</h2></div><div class="card-b" style="padding:16px">'
-      +'<div class="stat" style="padding:0 0 10px"><div class="n">'+cal+'</div><div class="l">of '+(s.cal_target)+' kcal</div></div>'
-      +bar('Calories',cal,s.cal_target,'')+bar('Protein',pro,s.protein_target,'g')+bar('Carbs',carb,s.carbs_target,'g')+bar('Fat',fat,s.fat_target,'g')
+      +'<div class="stat" style="padding:0 0 10px"><div class="n">'+Math.round(cal)+'</div><div class="l">of '+Math.round(calGoal)+' kcal</div></div>'
+      +bar('Calories',cal,calGoal,'')+bar('Protein',pro,proGoal,'g')+bar('Carbs',carb,carbGoal,'g')+bar('Fat',fat,fatGoal,'g')
     +'</div></div>'
-    +'<div class="card"><div class="card-h">'+svg(I.food,'ic')+'<h2>Food log</h2></div><div class="card-b">'
-      +'<div class="quick" style="flex-wrap:wrap">'
-        +'<input class="grow" id="fName" placeholder="Food item">'
-        +'<select id="fMeal"><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option></select>'
-        +'<input id="fCal" type="number" placeholder="kcal" style="width:80px">'
-        +'<input id="fPro" type="number" placeholder="P" style="width:60px">'
-        +'<input id="fCarb" type="number" placeholder="C" style="width:60px">'
-        +'<input id="fFat" type="number" placeholder="F" style="width:60px">'
-        +'<button class="btn primary" onclick="addFood()">'+svg(I.plus,'')+'</button>'
-      +'</div>'
-      +(mealBlocks||'<div class="empty">No food logged for this day.</div>')
+    +'<div class="card"><div class="card-h">'+svg(I.food,'ic')+'<h2>Meals</h2><span class="count">nutrition tracker</span></div><div class="card-b">'
+      +mealList
+      +'<div style="font-size:11px;color:var(--muted);padding:10px 4px 2px">'+esc(synced)+' -- synced automatically from your nutrition tracker.</div>'
     +'</div></div></div>';
-}
-async function addFood(){
-  const n=el('fName').value.trim();if(!n)return;
-  await sb.from('dc_food').insert({name:n,meal:el('fMeal').value,log_date:state.date,
-    calories:parseInt(el('fCal').value)||0,protein:parseInt(el('fPro').value)||0,
-    carbs:parseInt(el('fCarb').value)||0,fat:parseInt(el('fFat').value)||0});
-  el('fName').value='';el('fCal').value='';el('fPro').value='';el('fCarb').value='';el('fFat').value='';
-  navigate('food');
 }
 
 // ===================== WEIGHT TRACKER =====================
@@ -1850,7 +1846,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
-  addFood,addWeight,delWeight,viewPhoto,weightPhotoPicked,
+  addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
   addRoadmap,delRoadmapCard,tryUnlock,lock});
 </script>
