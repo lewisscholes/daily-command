@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 :root{
   --bg:#f7f7f5; --panel:#fbfbfa; --card:#ffffff; --ink:#37352f; --muted:#9b9a97;
@@ -316,6 +317,13 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .food-main{display:flex;flex-direction:column;gap:18px}
 @media(max-width:900px){.cal-wrap,.food-wrap{grid-template-columns:1fr}}
 .prog>i.over{background:linear-gradient(90deg,#ff8a5b,#ff5b7f)}
+.food-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.food-actions .btn{flex:1 1 auto}
+.scanbox{width:100%;border-radius:10px;overflow:hidden;background:#000;min-height:220px}
+.scanbox video{width:100%!important;height:auto!important;display:block}
+.aihint{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:10px;line-height:1.4}
+.aihint svg{flex:none}
+.aiprev{max-width:100%;max-height:180px;border-radius:10px;margin-bottom:10px;display:block}
 .spark{display:flex;align-items:flex-end;gap:5px;height:44px;padding:6px 2px 0}
 .sparkcol{flex:1;display:flex;align-items:flex-end;justify-content:center}
 .sparkcol>i{width:100%;max-width:16px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#9b6dff,#635bff)}
@@ -508,7 +516,9 @@ const I = {
   gripv:'<path d="M9 6h0M9 12h0M9 18h0M15 6h0M15 12h0M15 18h0"/>',
   scale:'<path d="M12 3v18M5 8h14M8 8l-3.5 7a3.5 3.5 0 007 0zM16 8l-3.5 7a3.5 3.5 0 007 0z"/>',
   list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-  board:'<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/>'
+  board:'<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/>',
+  scan:'<path d="M4 7V5a1 1 0 011-1h2M17 4h2a1 1 0 011 1v2M20 17v2a1 1 0 01-1 1h-2M7 20H5a1 1 0 01-1-1v-2M7 8v8M10 8v8M13 8v8M16 8v8"/>',
+  cam:'<path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/>'
 };
 function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
@@ -1512,9 +1522,15 @@ async function renderFood(v){
       +bar('Calories',cal,calGoal,'')+bar('Protein',pro,proGoal,'g')+bar('Carbs',carb,carbGoal,'g')+bar('Fat',fat,fatGoal,'g')
     +'</div></div>'
     +'<div class="food-main">'
-    +'<div class="card"><div class="card-h">'+svg(I.food,'ic')+'<h2>Meals</h2><span class="count">'+meals.length+'</span>'
-      +'<button class="btn primary sm" style="margin-left:8px" onclick="openMealModal()">'+svg(I.plus,'')+' Add meal</button></div>'
-      +'<div class="card-b">'+mealList+'</div></div>'
+    +'<div class="card"><div class="card-h">'+svg(I.food,'ic')+'<h2>Meals</h2><span class="count">'+meals.length+'</span></div>'
+      +'<div class="card-b">'
+      +'<div class="food-actions">'
+        +'<button class="btn primary sm" onclick="openScanModal()">'+svg(I.scan,'')+' Scan barcode</button>'
+        +'<button class="btn sm" onclick="openAiMealModal(\'photo\')">'+svg(I.cam,'')+' Snap meal</button>'
+        +'<button class="btn sm" onclick="openAiMealModal(\'text\')">'+svg(I.spark,'')+' Describe</button>'
+        +'<button class="btn sm" onclick="openMealModal()">'+svg(I.plus,'')+' Manual</button>'
+      +'</div>'
+      +mealList+'</div></div>'
     +'<div class="card"><div class="card-h">'+svg(I.dash,'ic')+'<h2>Trends &amp; history</h2><span class="count">last 30d</span></div><div class="card-b" style="padding:16px">'
       +'<div class="grid cols-3" style="gap:0">'
         +'<div class="stat"><div class="n">'+(avg7!=null?avg7:'--')+'</div><div class="l">Avg kcal / 7d</div></div>'
@@ -1529,9 +1545,10 @@ async function renderFood(v){
       +(days.length?'<div class="section-title">Last 14 days (calories)</div><div class="spark">'+spark+'</div>':'')
     +'</div></div></div></div>';
 }
-async function openMealModal(id){
+async function openMealModal(id,prefill){
   let x={name:'',meal_type:'Breakfast',at_time:'',calories:'',protein:'',carbs:'',fat:''};
   if(id){const {data}=await sb.from('dc_nutrition_meals').select('*').eq('id',id).single();if(data)x=data;}
+  else if(prefill){x=Object.assign(x,prefill);}
   const types=['Breakfast','Lunch','Dinner','Snack'];
   const mt=titleCase(x.meal_type||'Breakfast');const tt=x.at_time?x.at_time.slice(0,5):'';
   el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
@@ -1577,6 +1594,116 @@ async function saveGoals(){
   await sb.from('dc_settings').upsert(row,{onConflict:'id'});
   state.settings=Object.assign({},state.settings,row);
   closeModal();toast('Goals updated');navigate('food');
+}
+// ---- Barcode scanning (camera -> Open Food Facts) ----
+let _scanner=null,_scanBusy=false;
+function mealTypeNow(){const h=new Date().getHours();if(h<11)return 'Breakfast';if(h<15)return 'Lunch';if(h<18)return 'Snack';return 'Dinner';}
+async function openScanModal(){
+  if(!window.Html5Qrcode){toast('Scanner still loading -- try again in a moment');return;}
+  _scanBusy=false;
+  el('modalRoot').innerHTML='<div class="modal-bg"><div class="modal">'
+    +'<div class="modal-h">Scan barcode<button class="btn ghost sm x" onclick="closeScan()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b"><div id="scanReader" class="scanbox"></div>'
+    +'<div class="aihint">'+svg(I.scan,'')+' Point the camera at the product barcode. It logs the moment it reads.</div></div>'
+    +'<div class="modal-f"><button class="btn" onclick="closeScan()">Cancel</button></div>'
+  +'</div></div>';
+  try{
+    const fmts=[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,Html5QrcodeSupportedFormats.CODE_128];
+    _scanner=new Html5Qrcode('scanReader',{formatsToSupport:fmts,verbose:false});
+    await _scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:250,height:160}},onScanSuccess,function(){});
+  }catch(e){toast('Camera error: '+(e&&e.message||e)+' -- check camera permission');}
+}
+async function closeScan(){
+  if(_scanner){try{await _scanner.stop();}catch(_){}try{_scanner.clear();}catch(_){}_scanner=null;}
+  closeModal();
+}
+async function onScanSuccess(text){
+  if(_scanBusy)return;_scanBusy=true;
+  const code=(text||'').replace(/\D/g,'');
+  await closeScan();
+  if(code)await lookupBarcode(code); else toast('Could not read that barcode');
+}
+function normOFF(p,code){
+  const n=p.nutriments||{};
+  const num=v=>{const x=typeof v==='string'?parseFloat(v):v;return (typeof x==='number'&&isFinite(x))?Math.round(x*10)/10:null;};
+  const hasServing=!!p.serving_size&&n['energy-kcal_serving']!=null;
+  const pick=(sk,hk)=>hasServing?num(n[sk]):num(n[hk]);
+  return {name:(p.product_name||'').trim()||('Product '+code),
+    basis:hasServing?('per '+(p.serving_size||'serving')):'per 100g',
+    calories:pick('energy-kcal_serving','energy-kcal_100g'),
+    protein:pick('proteins_serving','proteins_100g'),
+    carbs:pick('carbohydrates_serving','carbohydrates_100g'),
+    fat:pick('fat_serving','fat_100g')};
+}
+async function lookupBarcode(code){
+  toast('Looking up '+code+'...');
+  let food=null;
+  try{
+    const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+code+'.json?fields=product_name,brands,serving_size,nutriments');
+    if(r.ok){const b=await r.json();if(b&&b.status!==0&&b.product)food=normOFF(b.product,code);}
+  }catch(_){/* offline/CORS -> manual fallback */}
+  const brand=food&&food.name?food.name:('Product '+code);
+  if(food&&(food.calories!=null||food.protein!=null||food.carbs!=null||food.fat!=null)){
+    openMealModal(null,{name:food.name,meal_type:mealTypeNow(),calories:food.calories,protein:food.protein,carbs:food.carbs,fat:food.fat});
+    toast('Found: '+food.name+' ('+food.basis+') -- adjust portion if needed');
+  }else{
+    openMealModal(null,{name:brand,meal_type:mealTypeNow()});
+    toast('Not in Open Food Facts -- enter the macros manually');
+  }
+}
+// ---- AI meal logging (photo / free text -> mealai edge function) ----
+let _aiPhoto=null;
+function openAiMealModal(mode){
+  _aiPhoto=null;const isPhoto=mode==='photo';
+  el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
+    +'<div class="modal-h">'+(isPhoto?'Snap a meal':'Describe a meal')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b">'
+      +(isPhoto?'<label class="btn full" style="justify-content:center;gap:8px;cursor:pointer;margin-bottom:10px">'+svg(I.cam,'')+' <span id="aiPhotoName">Take or choose a photo</span><input id="aiPhoto" type="file" accept="image/*" capture="environment" class="hide" onchange="aiPhotoPicked(this)"></label><div id="aiPhotoPrev"></div>':'')
+      +'<div class="field"><label>'+(isPhoto?'Notes (optional)':'What did you eat?')+'</label><textarea id="aiText" rows="3" placeholder="'+(isPhoto?'e.g. large portion, no dressing':'e.g. chicken salad, an apple, and a flat white')+'"></textarea></div>'
+      +'<div class="aihint">'+svg(I.spark,'')+' AI estimates calories and macros, then adds the meal. You can edit it after.</div>'
+    +'</div>'
+    +'<div class="modal-f"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="aiGo" onclick="aiLogMeal('+(isPhoto?'true':'false')+')">'+svg(I.spark,'')+' Log it</button></div>'
+  +'</div></div>';
+}
+function aiPhotoPicked(input){
+  const f=input.files&&input.files[0];if(!f)return;
+  const nm=el('aiPhotoName');if(nm)nm.textContent='Processing photo...';
+  const r=new FileReader();
+  r.onload=function(){
+    const img=new Image();
+    img.onload=function(){
+      // downscale to max 1024px longest edge, re-encode JPEG to keep payload small
+      const max=1024;let w=img.width,h=img.height;
+      if(w>h&&w>max){h=Math.round(h*max/w);w=max;}else if(h>=w&&h>max){w=Math.round(w*max/h);h=max;}
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      _aiPhoto=c.toDataURL('image/jpeg',0.8);
+      if(nm)nm.textContent=f.name;
+      const pv=el('aiPhotoPrev');if(pv)pv.innerHTML='<img class="aiprev" src="'+_aiPhoto+'">';
+    };
+    img.onerror=function(){_aiPhoto=r.result;if(nm)nm.textContent=f.name;};
+    img.src=r.result;
+  };
+  r.readAsDataURL(f);
+}
+function numOrNull(v){if(v==null||v==='')return null;const n=Number(v);return isFinite(n)?Math.round(n):null;}
+async function aiLogMeal(isPhoto){
+  const text=(el('aiText')&&el('aiText').value||'').trim();
+  if(isPhoto&&!_aiPhoto){toast('Add a photo first');return;}
+  if(!isPhoto&&!text){toast('Describe what you ate');return;}
+  const btn=el('aiGo');if(btn){btn.disabled=true;btn.innerHTML='Analyzing...';}
+  try{
+    const body={text:text,date:state.date};
+    if(_aiPhoto)body.image=_aiPhoto;
+    const {data,error}=await sb.functions.invoke('mealai',{body:body});
+    if(error)throw new Error(error.message||'Request failed');
+    if(data&&data.error==='no_key'){toast('AI not connected yet -- add ANTHROPIC_API_KEY in Supabase');if(btn){btn.disabled=false;btn.innerHTML=svg(I.spark,'')+' Log it';}return;}
+    const meals=(data&&data.meals)||[];
+    if(!meals.length){toast('Could not read any food -- try Manual');if(btn){btn.disabled=false;btn.innerHTML=svg(I.spark,'')+' Log it';}return;}
+    const rows=meals.map(m=>({meal_date:state.date,name:(m.name||'Meal').toString().slice(0,120),meal_type:(m.meal_type||mealTypeNow()).toString().toLowerCase(),calories:numOrNull(m.calories),protein:numOrNull(m.protein),carbs:numOrNull(m.carbs),fat:numOrNull(m.fat)}));
+    await sb.from('dc_nutrition_meals').insert(rows);
+    closeModal();toast('Logged '+rows.length+' item'+(rows.length>1?'s':''));navigate('food');
+  }catch(e){toast('AI error: '+(e&&e.message||e));if(btn){btn.disabled=false;btn.innerHTML=svg(I.spark,'')+' Log it';}}
 }
 
 // ===================== WEIGHT TRACKER =====================
@@ -1923,6 +2050,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
   openMealModal,saveMeal,delMeal,openGoalsModal,saveGoals,
+  openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
   addRoadmap,delRoadmapCard,tryUnlock,lock});
