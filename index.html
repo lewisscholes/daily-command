@@ -313,7 +313,13 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 /* ---- responsive splits (time / food) ---- */
 .cal-wrap{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
 .food-wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+.food-main{display:flex;flex-direction:column;gap:18px}
 @media(max-width:900px){.cal-wrap,.food-wrap{grid-template-columns:1fr}}
+.prog>i.over{background:linear-gradient(90deg,#ff8a5b,#ff5b7f)}
+.spark{display:flex;align-items:flex-end;gap:5px;height:44px;padding:6px 2px 0}
+.sparkcol{flex:1;display:flex;align-items:flex-end;justify-content:center}
+.sparkcol>i{width:100%;max-width:16px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#9b6dff,#635bff)}
+.sparkcol>i.hit{background:linear-gradient(180deg,#38d39f,#1fae7e)}
 
 .daynav button{display:flex;align-items:center;justify-content:center}
 
@@ -1466,41 +1472,111 @@ async function askCoach(scope,btn){
 // Read-only Food tracker: mirrors data synced from the nutrition tracker connector.
 async function renderFood(v){
   const date=state.date;const s=state.settings;
-  const [dayR,mealsR]=await Promise.all([
-    sb.from('dc_nutrition_days').select('*').eq('meal_date',date).maybeSingle(),
-    sb.from('dc_nutrition_meals').select('*').eq('meal_date',date).order('at_time',{nullsFirst:true}).order('synced_at')
+  const past=addDays(date,-29);
+  const [mealsR,histR]=await Promise.all([
+    sb.from('dc_nutrition_meals').select('*').eq('meal_date',date).order('at_time',{nullsFirst:true}).order('synced_at'),
+    sb.from('dc_nutrition_meals').select('meal_date,calories,protein,carbs,fat').gte('meal_date',past).lte('meal_date',date)
   ]);
-  const day=dayR.data;const meals=mealsR.data||[];
+  const meals=mealsR.data||[];const hist=histR.data||[];
   const sum=k=>meals.reduce((a,b)=>a+(Number(b[k])||0),0);
-  const num=(a,b)=>(a!=null&&a!=='')?Number(a):b;
-  const cal=day?num(day.calories,sum('calories')):sum('calories');
-  const pro=day?num(day.protein,sum('protein')):sum('protein');
-  const carb=day?num(day.carbs,sum('carbs')):sum('carbs');
-  const fat=day?num(day.fat,sum('fat')):sum('fat');
-  const calGoal=num(day&&day.calorie_goal,s.cal_target)||1;
-  const proGoal=num(day&&day.protein_goal,s.protein_target)||1;
-  const carbGoal=num(day&&day.carbs_goal,s.carbs_target)||1;
-  const fatGoal=num(day&&day.fat_goal,s.fat_target)||1;
-  function bar(lab,val,tgt,unit){const pct=tgt?Math.min(100,Math.round(val/tgt*100)):0;
-    return '<div class="macro"><div class="lab"><span>'+lab+'</span><span>'+Math.round(val)+' / '+Math.round(tgt)+unit+'</span></div><div class="prog"><i style="width:'+pct+'%"></i></div></div>';}
+  const cal=sum('calories'),pro=sum('protein'),carb=sum('carbs'),fat=sum('fat');
+  const calGoal=Number(s.cal_target)||2200,proGoal=Number(s.protein_target)||160,carbGoal=Number(s.carbs_target)||220,fatGoal=Number(s.fat_target)||70;
+  function bar(lab,val,tgt,unit){const pct=tgt?Math.min(100,Math.round(val/tgt*100)):0;const over=tgt&&val>tgt*1.05;
+    return '<div class="macro"><div class="lab"><span>'+lab+'</span><span>'+Math.round(val)+' / '+Math.round(tgt)+unit+'</span></div><div class="prog"><i class="'+(over?'over':'')+'" style="width:'+pct+'%"></i></div></div>';}
   const mealList=meals.length?meals.map(x=>
     '<div class="tbox"><div class="rt"><div class="t">'+esc(x.name||'Meal')+'</div><div class="m">'
       +(x.meal_type?'<span class="tag food">'+esc(titleCase(x.meal_type))+'</span>':'')
+      +(x.at_time?'<span>'+esc(x.at_time.slice(0,5))+'</span>':'')
       +'<span>'+Math.round(Number(x.calories)||0)+' kcal</span>'
       +'<span>P'+Math.round(Number(x.protein)||0)+' C'+Math.round(Number(x.carbs)||0)+' F'+Math.round(Number(x.fat)||0)+'</span>'
-    +'</div></div></div>').join('')
-    :'<div class="empty">No meals synced for this day yet. Your nutrition tracker data will appear here automatically.</div>';
-  const syncTs=(day&&day.synced_at)||(meals[0]&&meals[0].synced_at);
-  const synced=syncTs?'Last synced '+new Date(syncTs).toLocaleString():'Not synced yet';
+    +'</div></div>'
+    +'<div class="row-acts" style="opacity:1"><button class="btn ghost sm" title="Edit" onclick="openMealModal(\''+x.id+'\')">'+svg(I.pencil,'')+'</button>'
+    +'<button class="btn ghost sm" title="Delete" onclick="delMeal(\''+x.id+'\')">'+svg(I.trash,'')+'</button></div>'
+    +'</div>').join('')
+    :'<div class="empty">No meals logged for this day yet. Tap Add meal to log one.</div>';
+  // trends: aggregate calories per day over the window
+  const byDay={};hist.forEach(r=>{const d=r.meal_date;if(!byDay[d])byDay[d]={cal:0,pro:0};byDay[d].cal+=Number(r.calories)||0;byDay[d].pro+=Number(r.protein)||0;});
+  const days=Object.keys(byDay).sort();
+  const avg=(n)=>{const ds=days.filter(d=>d>addDays(date,-n));if(!ds.length)return null;return Math.round(ds.reduce((a,d)=>a+byDay[d].cal,0)/ds.length);};
+  const avg7=avg(7),avg30=avg(30);
+  const proAvg7=(()=>{const ds=days.filter(d=>d>addDays(date,-7));if(!ds.length)return null;return Math.round(ds.reduce((a,d)=>a+byDay[d].pro,0)/ds.length);})();
+  // logging streak ending today (consecutive days with >=1 meal up to selected date)
+  let streak=0;for(let i=0,d=date;i<60;i++,d=addDays(d,-1)){if(byDay[d])streak++;else break;}
+  const loggedDays=days.length;
+  const spark=days.slice(-14).map(d=>{const h=Math.max(4,Math.min(38,Math.round((byDay[d].cal/(calGoal||2200))*30)));const hit=Math.abs(byDay[d].cal-calGoal)<=calGoal*0.1;return '<div class="sparkcol" title="'+shortDate(d)+': '+Math.round(byDay[d].cal)+' kcal"><i class="'+(hit?'hit':'')+'" style="height:'+h+'px"></i></div>';}).join('');
   v.innerHTML='<div class="food-wrap">'
-    +'<div class="card"><div class="card-h">'+svg(I.target,'ic')+'<h2>Today vs goals</h2></div><div class="card-b" style="padding:16px">'
-      +'<div class="stat" style="padding:0 0 10px"><div class="n">'+Math.round(cal)+'</div><div class="l">of '+Math.round(calGoal)+' kcal</div></div>'
+    +'<div class="card"><div class="card-h">'+svg(I.target,'ic')+'<h2>'+(isToday(date)?'Today':shortDate(date))+' vs goals</h2>'
+      +'<button class="btn ghost sm" style="margin-left:auto" title="Edit goals" onclick="openGoalsModal()">'+svg(I.pencil,'')+' Goals</button></div>'
+      +'<div class="card-b" style="padding:16px">'
+      +'<div class="stat" style="padding:0 0 10px"><div class="n">'+Math.round(cal)+'</div><div class="l">of '+Math.round(calGoal)+' kcal &middot; '+Math.max(0,Math.round(calGoal-cal))+' left</div></div>'
       +bar('Calories',cal,calGoal,'')+bar('Protein',pro,proGoal,'g')+bar('Carbs',carb,carbGoal,'g')+bar('Fat',fat,fatGoal,'g')
     +'</div></div>'
-    +'<div class="card"><div class="card-h">'+svg(I.food,'ic')+'<h2>Meals</h2><span class="count">nutrition tracker</span></div><div class="card-b">'
-      +mealList
-      +'<div style="font-size:11px;color:var(--muted);padding:10px 4px 2px">'+esc(synced)+' -- synced automatically from your nutrition tracker.</div>'
-    +'</div></div></div>';
+    +'<div class="food-main">'
+    +'<div class="card"><div class="card-h">'+svg(I.food,'ic')+'<h2>Meals</h2><span class="count">'+meals.length+'</span>'
+      +'<button class="btn primary sm" style="margin-left:8px" onclick="openMealModal()">'+svg(I.plus,'')+' Add meal</button></div>'
+      +'<div class="card-b">'+mealList+'</div></div>'
+    +'<div class="card"><div class="card-h">'+svg(I.dash,'ic')+'<h2>Trends &amp; history</h2><span class="count">last 30d</span></div><div class="card-b" style="padding:16px">'
+      +'<div class="grid cols-3" style="gap:0">'
+        +'<div class="stat"><div class="n">'+(avg7!=null?avg7:'--')+'</div><div class="l">Avg kcal / 7d</div></div>'
+        +'<div class="stat"><div class="n">'+(avg30!=null?avg30:'--')+'</div><div class="l">Avg kcal / 30d</div></div>'
+        +'<div class="stat"><div class="n">'+(proAvg7!=null?proAvg7+'g':'--')+'</div><div class="l">Avg protein / 7d</div></div>'
+      +'</div>'
+      +'<div class="grid cols-3" style="gap:0;margin-top:4px">'
+        +'<div class="stat"><div class="n">'+streak+'</div><div class="l">Day logging streak</div></div>'
+        +'<div class="stat"><div class="n">'+loggedDays+'</div><div class="l">Days logged / 30</div></div>'
+        +'<div class="stat"><div class="n">'+days.filter(d=>Math.abs(byDay[d].cal-calGoal)<=calGoal*0.1).length+'</div><div class="l">Days on goal</div></div>'
+      +'</div>'
+      +(days.length?'<div class="section-title">Last 14 days (calories)</div><div class="spark">'+spark+'</div>':'')
+    +'</div></div></div></div>';
+}
+async function openMealModal(id){
+  let x={name:'',meal_type:'Breakfast',at_time:'',calories:'',protein:'',carbs:'',fat:''};
+  if(id){const {data}=await sb.from('dc_nutrition_meals').select('*').eq('id',id).single();if(data)x=data;}
+  const types=['Breakfast','Lunch','Dinner','Snack'];
+  const mt=titleCase(x.meal_type||'Breakfast');const tt=x.at_time?x.at_time.slice(0,5):'';
+  el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
+    +'<div class="modal-h">'+(id?'Edit meal':'Log meal')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b">'
+      +'<div class="field"><label>What did you eat?</label><input id="mName" value="'+esc(x.name||'')+'" placeholder="e.g. Chicken and rice"></div>'
+      +'<div class="inrow"><div class="field grow"><label>Meal</label><select id="mType">'+types.map(c=>'<option'+(mt===c?' selected':'')+'>'+c+'</option>').join('')+'</select></div>'
+        +'<div class="field grow"><label>Time (optional)</label><input id="mTime" type="time" value="'+tt+'"></div></div>'
+      +'<div class="inrow"><div class="field grow"><label>Calories</label><input id="mCal" inputmode="numeric" value="'+(x.calories!=null?x.calories:'')+'"></div>'
+        +'<div class="field grow"><label>Protein (g)</label><input id="mPro" inputmode="numeric" value="'+(x.protein!=null?x.protein:'')+'"></div></div>'
+      +'<div class="inrow"><div class="field grow"><label>Carbs (g)</label><input id="mCarb" inputmode="numeric" value="'+(x.carbs!=null?x.carbs:'')+'"></div>'
+        +'<div class="field grow"><label>Fat (g)</label><input id="mFat" inputmode="numeric" value="'+(x.fat!=null?x.fat:'')+'"></div></div>'
+    +'</div>'
+    +'<div class="modal-f">'+(id?'<button class="btn" style="margin-right:auto" onclick="delMeal(\''+id+'\')">Delete</button>':'')+'<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveMeal('+(id?'\''+id+'\'':'null')+')">Save</button></div>'
+  +'</div></div>';
+}
+async function saveMeal(id){
+  const name=el('mName').value.trim();if(!name){toast('Add a name');return;}
+  const n=v=>{const x=(v||'').trim();return x===''?null:Number(x);};
+  const row={name:name,meal_type:el('mType').value.toLowerCase(),at_time:el('mTime').value||null,
+    calories:n(el('mCal').value),protein:n(el('mPro').value),carbs:n(el('mCarb').value),fat:n(el('mFat').value)};
+  if(id){await sb.from('dc_nutrition_meals').update(row).eq('id',id);}
+  else{row.meal_date=state.date;await sb.from('dc_nutrition_meals').insert(row);}
+  closeModal();toast('Saved');navigate('food');
+}
+async function delMeal(id){if(!confirm('Delete this meal?'))return;await sb.from('dc_nutrition_meals').delete().eq('id',id);closeModal();navigate('food');}
+async function openGoalsModal(){
+  const s=state.settings;
+  el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
+    +'<div class="modal-h">Daily goals<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b">'
+      +'<div class="field"><label>Calories</label><input id="gCal" inputmode="numeric" value="'+(s.cal_target!=null?s.cal_target:'')+'"></div>'
+      +'<div class="inrow"><div class="field grow"><label>Protein (g)</label><input id="gPro" inputmode="numeric" value="'+(s.protein_target!=null?s.protein_target:'')+'"></div>'
+        +'<div class="field grow"><label>Carbs (g)</label><input id="gCarb" inputmode="numeric" value="'+(s.carbs_target!=null?s.carbs_target:'')+'"></div></div>'
+      +'<div class="field"><label>Fat (g)</label><input id="gFat" inputmode="numeric" value="'+(s.fat_target!=null?s.fat_target:'')+'"></div>'
+    +'</div>'
+    +'<div class="modal-f"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveGoals()">Save</button></div>'
+  +'</div></div>';
+}
+async function saveGoals(){
+  const n=(v,d)=>{const x=(v||'').trim();return x===''?d:Number(x);};
+  const row={id:1,cal_target:n(el('gCal').value,2200),protein_target:n(el('gPro').value,160),carbs_target:n(el('gCarb').value,220),fat_target:n(el('gFat').value,70)};
+  await sb.from('dc_settings').upsert(row,{onConflict:'id'});
+  state.settings=Object.assign({},state.settings,row);
+  closeModal();toast('Goals updated');navigate('food');
 }
 
 // ===================== WEIGHT TRACKER =====================
@@ -1846,6 +1922,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
+  openMealModal,saveMeal,delMeal,openGoalsModal,saveGoals,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
   addRoadmap,delRoadmapCard,tryUnlock,lock});
