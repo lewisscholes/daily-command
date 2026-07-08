@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- YouDo build: calendar mine-default filter -->
+<!-- YouDo build: disconnect accounts + roadmap board -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -217,6 +217,26 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .calfilters{display:flex;gap:8px;flex-wrap:wrap;margin:2px 4px 12px}
 .calfilter{border:1px solid var(--line2);background:#fff;border-radius:20px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;color:#54617a}
 .calfilter.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+/* roadmap board */
+.rboard{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start}
+@media(max-width:760px){.rboard{grid-template-columns:1fr}}
+.rcol{background:#f2f4f8;border:1px solid var(--line);border-radius:14px;padding:12px;min-height:120px;transition:.12s}
+.rcol.dragover{outline:2px dashed var(--accent);outline-offset:2px;background:var(--accent-soft)}
+.rcolh{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;padding:2px 4px 12px}
+.rcolh .rcount{margin-left:auto;color:var(--muted);font-weight:600}
+.rdot{width:9px;height:9px;border-radius:50%;background:#9aa6b2}
+.rdot.s{background:var(--signal)}.rdot.n{background:var(--noise)}
+.rcards{display:flex;flex-direction:column;gap:8px;min-height:44px}
+.rcard{background:#fff;border:1px solid var(--line2);border-radius:10px;padding:11px 12px;box-shadow:var(--shadow);cursor:grab;display:flex;align-items:center;gap:8px;touch-action:none}
+.rcard:active{cursor:grabbing}
+.rcard.dragging{opacity:.5;box-shadow:var(--shadow-lg)}
+.rct{flex:1;font-weight:500;font-size:14px}
+.rdel{border:none;background:none;color:#cfcfcc;cursor:pointer;padding:2px;display:flex;opacity:0}
+.rcard:hover .rdel{opacity:1}
+.rdel svg{width:15px;height:15px}
+.rempty{color:var(--muted);font-size:12px;text-align:center;padding:14px 8px;border:1px dashed var(--line2);border-radius:8px}
+.raddwrap{display:flex;gap:6px;margin-bottom:10px}
+.raddwrap input{flex:1;min-width:0;border:1px solid var(--line2);border-radius:8px;padding:9px 10px;font-size:16px;background:#fff}
 /* weight tracker */
 .wthumb{width:50px;height:50px;flex:0 0 50px;border-radius:10px;object-fit:cover;cursor:zoom-in;background:#f0f0ef;border:1px solid var(--line)}
 .wthumb.noimg{display:flex;align-items:center;justify-content:center;color:#c9c9c6;cursor:default}
@@ -481,7 +501,8 @@ const I = {
   back:'<path d="M15 18l-6-6 6-6"/>',
   gripv:'<path d="M9 6h0M9 12h0M9 18h0M15 6h0M15 12h0M15 18h0"/>',
   scale:'<path d="M12 3v18M5 8h14M8 8l-3.5 7a3.5 3.5 0 007 0zM16 8l-3.5 7a3.5 3.5 0 007 0z"/>',
-  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>'
+  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  board:'<rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/>'
 };
 function svg(p,cls){return '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="'+(cls||'')+'">'+p+'</svg>';}
 
@@ -545,11 +566,12 @@ const NAVS=[
   {k:'workouts',t:'Workouts',i:I.dumbbell},
   {k:'weight',t:'Weight',i:I.scale},
   {k:'calendar',t:'Calendar',i:I.cal},
+  {k:'roadmap',t:'Roadmap',i:I.board},
   {k:'todo',t:'To-Do',i:I.list},
   {k:'food',t:'Food & Calories',i:I.food}
 ];
 function buildNav(){
-  const allow = state.full ? ['dashboard','workouts','weight','calendar','food'] : ['workouts','weight','calendar','todo'];
+  const allow = state.full ? ['dashboard','workouts','weight','calendar','roadmap','food'] : ['workouts','weight','calendar','todo'];
   const items = NAVS.filter(n=>allow.includes(n.k));
   el('nav').innerHTML = '<div class="label">Navigate</div>' + items.map(n=>
     '<button data-k="'+n.k+'" onclick="navigate(\''+n.k+'\')">'+svg(n.i)+'<span>'+n.t+'</span></button>').join('');
@@ -567,7 +589,7 @@ function renderDayNav(){
 function shiftDay(n){state.date=addDays(state.date,n);navigate(state.view);}
 function goToday(){state.date=todayStr();navigate(state.view);}
 
-const TITLES={dashboard:'Dashboard',time:'Time-blocking',workouts:'Workouts',weight:'Weight',calendar:'Shared Calendar',todo:'To-Do',food:'Food & Calories'};
+const TITLES={dashboard:'Dashboard',time:'Time-blocking',workouts:'Workouts',weight:'Weight',calendar:'Calendar',roadmap:'Roadmap',todo:'To-Do',food:'Food & Calories'};
 async function navigate(k){
   clearWorkoutTimers();
   if(!state.full && !['workouts','weight','calendar','todo'].includes(k)) k='workouts'; // limited account allowed views
@@ -584,6 +606,7 @@ async function navigate(k){
   else if(k==='workouts') await renderWorkouts(v);
   else if(k==='weight') await renderWeight(v);
   else if(k==='calendar') await renderCalendar(v);
+  else if(k==='roadmap') await renderRoadmap(v);
   else if(k==='todo') await renderTodo(v);
   else if(k==='food') await renderFood(v);
 }
@@ -626,7 +649,7 @@ async function renderDashboard(v){
   const date=state.date;
   const [tasks,missions,vision] = await Promise.all([
     sb.from('dc_tasks').select('*').eq('scheduled_date',date).neq('status','skipped').order('sort_order').order('scheduled_time',{nullsFirst:false}),
-    sb.from('dc_missions').select('*').eq('scheduled_date',date).order('sort_order').order('created_at'),
+    sb.from('dc_missions').select('*').neq('status','done').not('scheduled_date','is',null).order('sort_order').order('created_at'),
     sb.from('dc_vision').select('*').order('sort_order').order('created_at')
   ]);
   const T=tasks.data||[],M=missions.data||[],V=vision.data||[];
@@ -909,7 +932,7 @@ async function refreshTodo(){
 }
 async function refreshMissions(){
   const c=el('card-mission');if(!c)return;
-  const {data}=await sb.from('dc_missions').select('*').eq('scheduled_date',state.date).order('sort_order').order('created_at');
+  const {data}=await sb.from('dc_missions').select('*').neq('status','done').not('scheduled_date','is',null).order('sort_order').order('created_at');
   c.outerHTML=missionCard(data||[]);
 }
 // ---- dashboard section ordering (drag to reorder, persisted per device) ----
@@ -1584,13 +1607,10 @@ async function renderCalendar(v){
   const from=todayStr(), to=addDays(from,28);
   const {data}=await sb.from('dc_calendar_events').select('*').gte('event_date',from).lte('event_date',to).order('event_date').order('start_time',{nullsFirst:true});
   const E=data||[];
+  // Accounts are independent: each calendar shows only its own events.
   const myOwner=state.account==='yasmin'?'yasmin':'main';
-  const f=state.calFilter||'mine';
-  const shown = f==='all' ? E
-    : f==='mine' ? E.filter(e=>{const o=e.owner_account||'main';return o===myOwner||o==='shared';})
-    : E.filter(e=>(e.owner_account||'main')===f);
-  const filters=[['mine','Mine'],['all','All'],['main','Lewis'],['yasmin','Yasmin'],['shared','Shared']];
-  const bar='<div class="calfilters">'+filters.map(x=>'<button class="calfilter'+(f===x[0]?' active':'')+'" onclick="setCalFilter(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>';
+  const shown = E.filter(e=>(e.owner_account||'main')===myOwner);
+  const bar='';
   let listHtml='';
   if(shown.length){
     let cur=null;
@@ -1618,7 +1638,6 @@ async function renderCalendar(v){
 async function openEventModal(id){
   let ev={title:'',event_date:todayStr(),start_time:'',end_time:'',owner_account:(state.account==='yasmin'?'yasmin':'main'),note:''};
   if(id){const {data}=await sb.from('dc_calendar_events').select('*').eq('id',id).single();if(data)ev=data;}
-  const owners=[['main','Lewis Account'],['yasmin','Yasmin Account'],['shared','Shared']];
   const st=ev.start_time?ev.start_time.slice(0,5):'', en=ev.end_time?ev.end_time.slice(0,5):'';
   el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
     +'<div class="modal-h">'+(id?'Edit event':'New event')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
@@ -1626,7 +1645,6 @@ async function openEventModal(id){
       +'<div class="field"><label>Title</label><input id="evTitle" value="'+esc(ev.title||'')+'"></div>'
       +'<div class="field"><label>Date</label><input id="evDate" type="date" value="'+(ev.event_date||todayStr())+'"></div>'
       +'<div class="field"><label>Time</label><div class="two"><input id="evStart" type="time" value="'+st+'"><input id="evEnd" type="time" value="'+en+'"></div></div>'
-      +'<div class="field"><label>Account</label><select id="evOwner">'+owners.map(x=>'<option value="'+x[0]+'"'+((ev.owner_account||'main')===x[0]?' selected':'')+'>'+x[1]+'</option>').join('')+'</select></div>'
       +'<div class="field"><label>Notes (optional)</label><textarea id="evNote" rows="2">'+esc(ev.note||'')+'</textarea></div>'
     +'</div>'
     +'<div class="modal-f">'+(id?'<button class="btn" style="margin-right:auto" onclick="delEvent(\''+id+'\')">Delete</button>':'')+'<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveEvent('+(id?'\''+id+'\'':'null')+')">Save</button></div>'
@@ -1635,12 +1653,74 @@ async function openEventModal(id){
 function closeModal(){el('modalRoot').innerHTML='';}
 async function saveEvent(id){
   const t=el('evTitle').value.trim();if(!t){toast('Add a title');return;}
-  const row={title:t,event_date:el('evDate').value||todayStr(),start_time:el('evStart').value||null,end_time:el('evEnd').value||null,owner_account:el('evOwner').value,note:el('evNote').value||null};
+  const myOwner=state.account==='yasmin'?'yasmin':'main';
+  const row={title:t,event_date:el('evDate').value||todayStr(),start_time:el('evStart').value||null,end_time:el('evEnd').value||null,owner_account:myOwner,note:el('evNote').value||null};
   if(id){await sb.from('dc_calendar_events').update(row).eq('id',id);}
   else{row.source='manual';row.created_by=state.account;await sb.from('dc_calendar_events').insert(row);}
   closeModal();toast('Saved');navigate('calendar');
 }
-async function delEvent(id){if(!confirm('Delete this event? It is removed for both accounts.'))return;await sb.from('dc_calendar_events').delete().eq('id',id);closeModal();navigate('calendar');}
+async function delEvent(id){if(!confirm('Delete this event?'))return;await sb.from('dc_calendar_events').delete().eq('id',id);closeModal();navigate('calendar');}
+
+// ===================== ROADMAP BOARD (main account) =====================
+// Backlog of work over time. Cards live in dc_missions: a Roadmap card has no
+// scheduled_date (off dashboard). Dragging into Signals/Noise sets priority +
+// today's date so it shows in the dashboard Mission card until done or moved back.
+async function renderRoadmap(v){
+  const {data}=await sb.from('dc_missions').select('*').neq('status','done').order('sort_order').order('created_at');
+  const M=data||[];
+  const road=M.filter(m=>!m.scheduled_date);
+  const sig=M.filter(m=>m.scheduled_date&&m.priority==='signal');
+  const noi=M.filter(m=>m.scheduled_date&&m.priority==='noise');
+  function card(m){return '<div class="rcard" data-id="'+m.id+'"><span class="rct">'+esc(m.title)+'</span><button class="rdel" title="Delete" onclick="delRoadmapCard(\''+m.id+'\')">'+svg(I.x,'')+'</button></div>';}
+  function colBody(items){return items.length?items.map(card).join(''):'<div class="rempty">Drag cards here</div>';}
+  v.innerHTML='<div style="font-size:13px;color:var(--muted);margin:0 4px 14px">Brain-dump everything that needs doing. Drag a card into Signals or Noise to put it on your dashboard -- it stays until you complete it or drag it back.</div>'
+    +'<div class="rboard" id="rboard">'
+      +'<div class="rcol" data-col="roadmap"><div class="rcolh"><span class="rdot"></span>Roadmap<span class="rcount">'+road.length+'</span></div>'
+        +'<div class="raddwrap"><input id="rNew" placeholder="Add a task..." onkeydown="if(event.key===\'Enter\')addRoadmap()"><button class="btn primary sm" onclick="addRoadmap()">'+svg(I.plus,'')+'</button></div>'
+        +'<div class="rcards">'+colBody(road)+'</div></div>'
+      +'<div class="rcol" data-col="signal"><div class="rcolh"><span class="rdot s"></span>Signals<span class="rcount">'+sig.length+'</span></div><div class="rcards">'+colBody(sig)+'</div></div>'
+      +'<div class="rcol" data-col="noise"><div class="rcolh"><span class="rdot n"></span>Noise<span class="rcount">'+noi.length+'</span></div><div class="rcards">'+colBody(noi)+'</div></div>'
+    +'</div>';
+  initRoadmapDnD();
+}
+async function addRoadmap(){
+  const i=el('rNew');const t=(i.value||'').trim();if(!t)return;
+  // Roadmap backlog = scheduled_date null (keeps it off the dashboard). priority
+  // is NOT NULL so it keeps its default until moved into a column.
+  await sb.from('dc_missions').insert({title:t,scheduled_date:null,category:'general',status:'pending'});
+  i.value='';navigate('roadmap');
+}
+async function delRoadmapCard(id){await sb.from('dc_missions').delete().eq('id',id);navigate('roadmap');}
+async function moveRoadmapCard(id,col){
+  if(col==='roadmap') await sb.from('dc_missions').update({scheduled_date:null}).eq('id',id);
+  else await sb.from('dc_missions').update({priority:col,scheduled_date:todayStr()}).eq('id',id);
+  navigate('roadmap');
+}
+function initRoadmapDnD(){
+  const board=el('rboard');if(!board||board._wired)return;board._wired=true;
+  let drag=null,sx=0,sy=0,active=false;
+  function colUnder(x,y){const e=document.elementFromPoint(x,y);return e?e.closest('.rcol'):null;}
+  board.addEventListener('pointerdown',e=>{
+    const c=e.target.closest('.rcard');if(!c)return;if(e.target.closest('.rdel'))return;
+    drag={card:c,id:c.dataset.id};sx=e.clientX;sy=e.clientY;active=false;
+    try{c.setPointerCapture(e.pointerId);}catch(_){}
+  });
+  board.addEventListener('pointermove',e=>{
+    if(!drag)return;
+    if(!active){if(Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy)<6)return;active=true;drag.card.classList.add('dragging');}
+    const col=colUnder(e.clientX,e.clientY);
+    [...board.querySelectorAll('.rcol')].forEach(x=>x.classList.toggle('dragover',x===col));
+  });
+  async function end(e){
+    if(!drag)return;const d=drag;drag=null;d.card.classList.remove('dragging');
+    [...board.querySelectorAll('.rcol')].forEach(x=>x.classList.remove('dragover'));
+    if(!active)return;
+    const col=colUnder(e.clientX,e.clientY);
+    if(col) await moveRoadmapCard(d.id,col.dataset.col);
+  }
+  board.addEventListener('pointerup',end);
+  board.addEventListener('pointercancel',end);
+}
 
 // ===================== STANDARD TO-DO (Yasmin account) =====================
 // Yasmin daily routine [type,title,category]
@@ -1708,7 +1788,6 @@ async function renderTodo(v){
       +(todays.length?todays.map(trow).join(''):'<div class="empty">Nothing for today yet.</div>')
       +(upcoming.length?'<div class="section-title">Upcoming</div>'+upcoming.map(trow).join(''):'')
     +'</div></div>';
-  html+='<div style="height:18px"></div>'+await lewisNeedsCard();
   v.innerHTML=html;
 }
 async function openTodoModal(id){
@@ -1772,7 +1851,8 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
   addFood,addWeight,delWeight,viewPhoto,weightPhotoPicked,
-  setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,tryUnlock,lock});
+  setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
+  addRoadmap,delRoadmapCard,tryUnlock,lock});
 </script>
 <script>
 (new Function(document.getElementById('app-script').textContent)).call(window);
