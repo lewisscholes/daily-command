@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- YouDo build: disconnect accounts + roadmap board -->
+<!-- YouDo build: remove calendar tab -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -571,7 +571,7 @@ const NAVS=[
   {k:'food',t:'Food & Calories',i:I.food}
 ];
 function buildNav(){
-  const allow = state.full ? ['dashboard','workouts','weight','calendar','roadmap','food'] : ['workouts','weight','calendar','todo'];
+  const allow = state.full ? ['dashboard','workouts','weight','roadmap','food'] : ['workouts','weight','todo'];
   const items = NAVS.filter(n=>allow.includes(n.k));
   el('nav').innerHTML = '<div class="label">Navigate</div>' + items.map(n=>
     '<button data-k="'+n.k+'" onclick="navigate(\''+n.k+'\')">'+svg(n.i)+'<span>'+n.t+'</span></button>').join('');
@@ -592,7 +592,7 @@ function goToday(){state.date=todayStr();navigate(state.view);}
 const TITLES={dashboard:'Dashboard',time:'Time-blocking',workouts:'Workouts',weight:'Weight',calendar:'Calendar',roadmap:'Roadmap',todo:'To-Do',food:'Food & Calories'};
 async function navigate(k){
   clearWorkoutTimers();
-  if(!state.full && !['workouts','weight','calendar','todo'].includes(k)) k='workouts'; // limited account allowed views
+  if(!state.full && !['workouts','weight','todo'].includes(k)) k='workouts'; // limited account allowed views
   state.view=k;setActive();
   el('viewTitle').textContent=TITLES[k];
   el('viewSub').textContent=prettyDate(state.date);
