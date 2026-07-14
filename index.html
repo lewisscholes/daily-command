@@ -219,8 +219,14 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .calfilter{border:1px solid var(--line2);background:#fff;border-radius:20px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer;color:#54617a}
 .calfilter.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 /* roadmap board */
-.rboard{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start}
-@media(max-width:760px){.rboard{grid-template-columns:1fr}}
+.rtoolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 4px 12px}
+.rselect{padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:#fff;font-size:14px;font-weight:600;min-width:160px}
+.rtag{display:inline-block;margin-left:8px;font-size:10px;font-weight:600;color:var(--muted);background:#eef1f6;border-radius:6px;padding:1px 6px;vertical-align:middle}
+.rboard{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;align-items:start}
+@media(max-width:1000px){.rboard{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.rboard{grid-template-columns:1fr}}
+.rdot.d{background:#38d39f}
+.rcol.rdone .rcard{opacity:.72}
 .rcol{background:#f2f4f8;border:1px solid var(--line);border-radius:14px;padding:12px;min-height:120px;transition:.12s}
 .rcol.dragover{outline:2px dashed var(--accent);outline-offset:2px;background:var(--accent-soft)}
 .rcolh{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;padding:2px 4px 12px}
@@ -1864,35 +1870,76 @@ async function delEvent(id){if(!confirm('Delete this event?'))return;await sb.fr
 // Backlog of work over time. Cards live in dc_missions: a Roadmap card has no
 // scheduled_date (off dashboard). Dragging into Signals/Noise sets priority +
 // today's date so it shows in the dashboard Mission card until done or moved back.
+function getRoadmapFilter(){return localStorage.getItem('dc_roadmap_filter')||'all';}
+function setRoadmapFilter(val){localStorage.setItem('dc_roadmap_filter',val||'all');navigate('roadmap');}
 async function renderRoadmap(v){
-  const {data}=await sb.from('dc_missions').select('*').neq('status','done').order('sort_order').order('created_at');
-  const M=data||[];
-  const road=M.filter(m=>!m.scheduled_date);
-  const sig=M.filter(m=>m.scheduled_date&&m.priority==='signal');
-  const noi=M.filter(m=>m.scheduled_date&&m.priority==='noise');
-  function card(m){return '<div class="rcard" data-id="'+m.id+'"><span class="rct">'+esc(m.title)+'</span><button class="rdel" title="Delete" onclick="delRoadmapCard(\''+m.id+'\')">'+svg(I.x,'')+'</button></div>';}
-  function colBody(items){return items.length?items.map(card).join(''):'<div class="rempty">Drag cards here</div>';}
-  v.innerHTML='<div style="font-size:13px;color:var(--muted);margin:0 4px 14px">Brain-dump everything that needs doing. Drag a card into Signals or Noise to put it on your dashboard -- it stays until you complete it or drag it back.</div>'
+  const filter=getRoadmapFilter();
+  const [rmR,mR]=await Promise.all([
+    sb.from('dc_roadmaps').select('*').order('sort_order').order('created_at'),
+    sb.from('dc_missions').select('*').order('sort_order').order('created_at')
+  ]);
+  const boards=rmR.data||[];const bname={};boards.forEach(b=>bname[b.id]=b.name);
+  const valid=(filter==='all'||boards.some(b=>b.id===filter))?filter:'all';
+  let M=mR.data||[];
+  if(valid!=='all') M=M.filter(m=>m.roadmap_id===valid);
+  const done=M.filter(m=>m.status==='done');
+  const active=M.filter(m=>m.status!=='done');
+  const road=active.filter(m=>!m.scheduled_date);
+  const sig=active.filter(m=>m.scheduled_date&&m.priority==='signal');
+  const noi=active.filter(m=>m.scheduled_date&&m.priority==='noise');
+  const showTag=valid==='all';
+  function card(m){return '<div class="rcard" data-id="'+m.id+'"><span class="rct">'+esc(m.title)+(showTag&&m.roadmap_id&&bname[m.roadmap_id]?'<span class="rtag">'+esc(bname[m.roadmap_id])+'</span>':'')+'</span><button class="rdel" title="Delete" onclick="delRoadmapCard(\''+m.id+'\')">'+svg(I.x,'')+'</button></div>';}
+  function colBody(items,empty){return items.length?items.map(card).join(''):'<div class="rempty">'+(empty||'Drag cards here')+'</div>';}
+  const opts='<option value="all"'+(valid==='all'?' selected':'')+'>All roadmaps</option>'+boards.map(b=>'<option value="'+b.id+'"'+(valid===b.id?' selected':'')+'>'+esc(b.name)+'</option>').join('');
+  v.innerHTML='<div class="rtoolbar">'
+      +'<select class="rselect" onchange="setRoadmapFilter(this.value)">'+opts+'</select>'
+      +'<button class="btn sm" onclick="addRoadmapBoard()">'+svg(I.plus,'')+' New roadmap</button>'
+      +(valid!=='all'?'<button class="btn ghost sm" title="Delete this roadmap" onclick="delRoadmapBoard()">'+svg(I.trash,'')+'</button>':'')
+    +'</div>'
+    +'<div style="font-size:13px;color:var(--muted);margin:0 4px 14px">Brain-dump everything that needs doing. Drag a card into Signals or Noise to put it on your dashboard, or into Done once it is finished.</div>'
     +'<div class="rboard" id="rboard">'
       +'<div class="rcol" data-col="roadmap"><div class="rcolh"><span class="rdot"></span>Roadmap<span class="rcount">'+road.length+'</span></div>'
         +'<div class="raddwrap"><input id="rNew" placeholder="Add a task..." onkeydown="if(event.key===\'Enter\')addRoadmap()"><button class="btn primary sm" onclick="addRoadmap()">'+svg(I.plus,'')+'</button></div>'
         +'<div class="rcards">'+colBody(road)+'</div></div>'
       +'<div class="rcol" data-col="signal"><div class="rcolh"><span class="rdot s"></span>Signals<span class="rcount">'+sig.length+'</span></div><div class="rcards">'+colBody(sig)+'</div></div>'
       +'<div class="rcol" data-col="noise"><div class="rcolh"><span class="rdot n"></span>Noise<span class="rcount">'+noi.length+'</span></div><div class="rcards">'+colBody(noi)+'</div></div>'
+      +'<div class="rcol rdone" data-col="done"><div class="rcolh"><span class="rdot d"></span>Done<span class="rcount">'+done.length+'</span></div><div class="rcards">'+colBody(done,'Drag finished cards here')+'</div></div>'
     +'</div>';
   initRoadmapDnD();
 }
 async function addRoadmap(){
   const i=el('rNew');const t=(i.value||'').trim();if(!t)return;
-  // Roadmap backlog = scheduled_date null (keeps it off the dashboard). priority
-  // is NOT NULL so it keeps its default until moved into a column.
-  await sb.from('dc_missions').insert({title:t,scheduled_date:null,category:'general',status:'pending'});
+  // Roadmap backlog = scheduled_date null (keeps it off the dashboard). Assign to
+  // the currently filtered board (or the first board when viewing All).
+  let rid=getRoadmapFilter();
+  if(rid==='all'){const {data}=await sb.from('dc_roadmaps').select('id').order('sort_order').order('created_at').limit(1);rid=(data&&data[0]&&data[0].id)||null;}
+  await sb.from('dc_missions').insert({title:t,scheduled_date:null,category:'general',status:'pending',roadmap_id:rid});
   i.value='';navigate('roadmap');
+}
+async function addRoadmapBoard(){
+  const name=prompt('Name this roadmap (e.g. Fitness, Business, Home):');
+  if(!name||!name.trim())return;
+  const {data:mx}=await sb.from('dc_roadmaps').select('sort_order').order('sort_order',{ascending:false}).limit(1);
+  const so=(mx&&mx[0]&&mx[0].sort_order!=null)?mx[0].sort_order+1:0;
+  const {data}=await sb.from('dc_roadmaps').insert({name:name.trim(),sort_order:so}).select('id').single();
+  if(data&&data.id)localStorage.setItem('dc_roadmap_filter',data.id);
+  navigate('roadmap');
+}
+async function delRoadmapBoard(){
+  const rid=getRoadmapFilter();
+  if(rid==='all'){toast('Pick a roadmap first');return;}
+  const {data:others}=await sb.from('dc_roadmaps').select('id,name').neq('id',rid).order('sort_order').order('created_at');
+  if(!others||!others.length){toast('Keep at least one roadmap');return;}
+  if(!confirm('Delete this roadmap? Its cards move to "'+others[0].name+'".'))return;
+  await sb.from('dc_missions').update({roadmap_id:others[0].id}).eq('roadmap_id',rid);
+  await sb.from('dc_roadmaps').delete().eq('id',rid);
+  setRoadmapFilter('all');
 }
 async function delRoadmapCard(id){await sb.from('dc_missions').delete().eq('id',id);navigate('roadmap');}
 async function moveRoadmapCard(id,col){
-  if(col==='roadmap') await sb.from('dc_missions').update({scheduled_date:null}).eq('id',id);
-  else await sb.from('dc_missions').update({priority:col,scheduled_date:todayStr()}).eq('id',id);
+  if(col==='roadmap') await sb.from('dc_missions').update({scheduled_date:null,status:'pending',completed_at:null}).eq('id',id);
+  else if(col==='done') await sb.from('dc_missions').update({status:'done',completed_at:new Date().toISOString()}).eq('id',id);
+  else await sb.from('dc_missions').update({priority:col,scheduled_date:todayStr(),status:'pending',completed_at:null}).eq('id',id);
   navigate('roadmap');
 }
 function initRoadmapDnD(){
@@ -2053,7 +2100,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
-  addRoadmap,delRoadmapCard,tryUnlock,lock});
+  addRoadmap,delRoadmapCard,setRoadmapFilter,addRoadmapBoard,delRoadmapBoard,tryUnlock,lock});
 </script>
 <script>
 (new Function(document.getElementById('app-script').textContent)).call(window);
