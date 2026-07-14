@@ -237,6 +237,8 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .rcard{background:#fff;border:1px solid var(--line2);border-radius:10px;padding:11px 12px;box-shadow:var(--shadow);cursor:grab;display:flex;align-items:center;gap:8px;touch-action:none}
 .rcard:active{cursor:grabbing}
 .rcard.dragging{opacity:.5;box-shadow:var(--shadow-lg)}
+.rghost{position:fixed;z-index:9999;pointer-events:none;margin:0!important;box-shadow:0 12px 28px rgba(20,30,60,.28);transform:rotate(1.5deg) scale(1.02);opacity:.97;background:#fff;border:1px solid var(--line2);border-radius:10px;padding:11px 12px;display:flex;align-items:center;gap:8px}
+.rph{border:2px dashed var(--accent);background:var(--accent-soft);border-radius:10px;transition:height .1s}
 .rct{flex:1;font-weight:500;font-size:14px}
 .rdel{border:none;background:none;color:#cfcfcc;cursor:pointer;padding:2px;display:flex;opacity:0}
 .rcard:hover .rdel{opacity:1}
@@ -1942,27 +1944,79 @@ async function moveRoadmapCard(id,col){
   else await sb.from('dc_missions').update({priority:col,scheduled_date:todayStr(),status:'pending',completed_at:null}).eq('id',id);
   navigate('roadmap');
 }
+function refreshRoadmapCounts(){
+  const board=el('rboard');if(!board)return;
+  board.querySelectorAll('.rcol').forEach(col=>{
+    const wrap=col.querySelector('.rcards');if(!wrap)return;
+    const n=wrap.querySelectorAll('.rcard').length;
+    const c=col.querySelector('.rcount');if(c)c.textContent=n;
+    let empty=wrap.querySelector('.rempty');
+    if(n===0&&!empty){empty=document.createElement('div');empty.className='rempty';empty.textContent=(col.dataset.col==='done')?'Drag finished cards here':'Drag cards here';wrap.appendChild(empty);}
+    if(n>0&&empty)empty.remove();
+  });
+}
+async function persistRoadmapMove(id,col,targetCol){
+  let fields;
+  if(col==='roadmap')fields={scheduled_date:null,status:'pending',completed_at:null};
+  else if(col==='done')fields={status:'done',completed_at:new Date().toISOString()};
+  else fields={priority:col,scheduled_date:todayStr(),status:'pending',completed_at:null};
+  const ids=targetCol?[...targetCol.querySelectorAll('.rcards .rcard')].map(c=>c.dataset.id):[id];
+  const updates=ids.map((cid,i)=>{
+    const patch={sort_order:i};
+    if(cid===id)Object.assign(patch,fields);
+    return sb.from('dc_missions').update(patch).eq('id',cid);
+  });
+  try{await Promise.all(updates);}catch(_){toast('Could not save changes');}
+}
+// Notion-style drag: the card lifts and follows the pointer, a live placeholder
+// shows where it will land, and the drop is applied to the DOM instantly then
+// saved in the background (no full re-render / jump).
 function initRoadmapDnD(){
   const board=el('rboard');if(!board||board._wired)return;board._wired=true;
-  let drag=null,sx=0,sy=0,active=false;
-  function colUnder(x,y){const e=document.elementFromPoint(x,y);return e?e.closest('.rcol'):null;}
+  let drag=null;
+  function colUnder(x,y){const g=drag&&drag.ghost;if(g)g.style.display='none';const e=document.elementFromPoint(x,y);if(g)g.style.display='';return e?e.closest('.rcol'):null;}
+  function placeInto(col,y){
+    const wrap=col.querySelector('.rcards');if(!wrap)return;
+    const cards=[...wrap.querySelectorAll('.rcard')].filter(c=>c!==drag.card);
+    let before=null;
+    for(const c of cards){const r=c.getBoundingClientRect();if(y<r.top+r.height/2){before=c;break;}}
+    if(before)wrap.insertBefore(drag.ph,before);else wrap.appendChild(drag.ph);
+  }
   board.addEventListener('pointerdown',e=>{
     const c=e.target.closest('.rcard');if(!c)return;if(e.target.closest('.rdel'))return;
-    drag={card:c,id:c.dataset.id};sx=e.clientX;sy=e.clientY;active=false;
-    try{c.setPointerCapture(e.pointerId);}catch(_){}
+    const r=c.getBoundingClientRect();
+    drag={card:c,id:c.dataset.id,offX:e.clientX-r.left,offY:e.clientY-r.top,w:r.width,h:r.height,sx:e.clientX,sy:e.clientY,active:false};
+    try{board.setPointerCapture(e.pointerId);}catch(_){}
   });
   board.addEventListener('pointermove',e=>{
     if(!drag)return;
-    if(!active){if(Math.abs(e.clientX-sx)+Math.abs(e.clientY-sy)<6)return;active=true;drag.card.classList.add('dragging');}
+    if(!drag.active){
+      if(Math.abs(e.clientX-drag.sx)+Math.abs(e.clientY-drag.sy)<6)return;
+      drag.active=true;
+      const g=drag.card.cloneNode(true);g.classList.add('rghost');g.style.width=drag.w+'px';document.body.appendChild(g);drag.ghost=g;
+      const ph=document.createElement('div');ph.className='rph';ph.style.height=drag.h+'px';drag.ph=ph;
+      drag.card.parentNode.insertBefore(ph,drag.card);
+      drag.card.style.display='none';
+    }
+    drag.ghost.style.left=(e.clientX-drag.offX)+'px';
+    drag.ghost.style.top=(e.clientY-drag.offY)+'px';
     const col=colUnder(e.clientX,e.clientY);
     [...board.querySelectorAll('.rcol')].forEach(x=>x.classList.toggle('dragover',x===col));
+    if(col)placeInto(col,e.clientY);
+    e.preventDefault();
   });
   async function end(e){
-    if(!drag)return;const d=drag;drag=null;d.card.classList.remove('dragging');
+    if(!drag)return;const d=drag;drag=null;
+    try{board.releasePointerCapture(e.pointerId);}catch(_){}
     [...board.querySelectorAll('.rcol')].forEach(x=>x.classList.remove('dragover'));
-    if(!active)return;
-    const col=colUnder(e.clientX,e.clientY);
-    if(col) await moveRoadmapCard(d.id,col.dataset.col);
+    if(!d.active)return;
+    if(d.ghost)d.ghost.remove();
+    const targetCol=d.ph?d.ph.closest('.rcol'):null;
+    d.card.style.display='';
+    if(d.ph){d.ph.parentNode.insertBefore(d.card,d.ph);d.ph.remove();}
+    const colName=targetCol?targetCol.dataset.col:'roadmap';
+    refreshRoadmapCounts();
+    await persistRoadmapMove(d.id,colName,targetCol);
   }
   board.addEventListener('pointerup',end);
   board.addEventListener('pointercancel',end);
