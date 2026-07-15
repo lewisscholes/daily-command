@@ -326,6 +326,12 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 @media(max-width:900px){.cal-wrap,.food-wrap{grid-template-columns:1fr}}
 .prog>i.over{background:linear-gradient(90deg,#ff8a5b,#ff5b7f)}
 .food-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.msec{margin-bottom:16px}
+.msec-h{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:2px solid var(--line);margin-bottom:8px}
+.msec-t{font-weight:700;font-size:14px}
+.msec-k{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600}
+.msec-add{padding:4px 8px!important}
+.msec-empty{color:var(--muted);font-size:12px;padding:6px 4px 10px}
 .food-actions .btn{flex:1 1 auto}
 .scanbox{width:100%;border-radius:10px;overflow:hidden;background:#000;min-height:220px}
 .scanbox video{width:100%!important;height:auto!important;display:block}
@@ -1501,17 +1507,32 @@ async function renderFood(v){
   const calGoal=Number(s.cal_target)||2200,proGoal=Number(s.protein_target)||160,carbGoal=Number(s.carbs_target)||220,fatGoal=Number(s.fat_target)||70;
   function bar(lab,val,tgt,unit){const pct=tgt?Math.min(100,Math.round(val/tgt*100)):0;const over=tgt&&val>tgt*1.05;
     return '<div class="macro"><div class="lab"><span>'+lab+'</span><span>'+Math.round(val)+' / '+Math.round(tgt)+unit+'</span></div><div class="prog"><i class="'+(over?'over':'')+'" style="width:'+pct+'%"></i></div></div>';}
-  const mealList=meals.length?meals.map(x=>
-    '<div class="tbox"><div class="rt"><div class="t">'+esc(x.name||'Meal')+'</div><div class="m">'
-      +(x.meal_type?'<span class="tag food">'+esc(titleCase(x.meal_type))+'</span>':'')
+  // Group meals into breakfast / lunch / dinner / snack sections (MyFitnessPal-style)
+  const MT=[['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snack','Snack']];
+  const groups={};meals.forEach(m=>{const k=(m.meal_type||'snack').toLowerCase();(groups[k]=groups[k]||[]).push(m);});
+  function mrow(x){return '<div class="tbox"><div class="rt"><div class="t">'+esc(x.name||'Meal')+'</div><div class="m">'
       +(x.at_time?'<span>'+esc(x.at_time.slice(0,5))+'</span>':'')
       +'<span>'+Math.round(Number(x.calories)||0)+' kcal</span>'
       +'<span>P'+Math.round(Number(x.protein)||0)+' C'+Math.round(Number(x.carbs)||0)+' F'+Math.round(Number(x.fat)||0)+'</span>'
     +'</div></div>'
     +'<div class="row-acts" style="opacity:1"><button class="btn ghost sm" title="Edit" onclick="openMealModal(\''+x.id+'\')">'+svg(I.pencil,'')+'</button>'
     +'<button class="btn ghost sm" title="Delete" onclick="delMeal(\''+x.id+'\')">'+svg(I.trash,'')+'</button></div>'
-    +'</div>').join('')
-    :'<div class="empty">No meals logged for this day yet. Tap Add meal to log one.</div>';
+    +'</div>';}
+  function msection(key,label){
+    const items=groups[key]||[];
+    const kc=items.reduce((a,b)=>a+(Number(b.calories)||0),0);
+    const p=items.reduce((a,b)=>a+(Number(b.protein)||0),0);
+    const c=items.reduce((a,b)=>a+(Number(b.carbs)||0),0);
+    const f=items.reduce((a,b)=>a+(Number(b.fat)||0),0);
+    return '<div class="msec">'
+      +'<div class="msec-h"><span class="msec-t">'+label+'</span>'
+        +'<span class="msec-k">'+Math.round(kc)+' kcal'+(items.length?' &middot; P'+Math.round(p)+' C'+Math.round(c)+' F'+Math.round(f):'')+'</span>'
+        +'<button class="btn ghost sm msec-add" title="Add to '+label+'" onclick="addMealTo(\''+label+'\')">'+svg(I.plus,'')+'</button>'
+      +'</div>'
+      +(items.length?items.map(mrow).join(''):'<div class="msec-empty">Nothing logged yet</div>')
+    +'</div>';
+  }
+  const mealList=MT.map(t=>msection(t[0],t[1])).join('');
   // trends: aggregate calories per day over the window
   const byDay={};hist.forEach(r=>{const d=r.meal_date;if(!byDay[d])byDay[d]={cal:0,pro:0};byDay[d].cal+=Number(r.calories)||0;byDay[d].pro+=Number(r.protein)||0;});
   const days=Object.keys(byDay).sort();
@@ -1593,6 +1614,7 @@ function scaleMealFromGrams(){
   const set=(id,v)=>{const e=el(id);if(e)e.value=Math.round((v||0)*g/100);};
   set('mCal',_mealPer100.calories);set('mPro',_mealPer100.protein);set('mCarb',_mealPer100.carbs);set('mFat',_mealPer100.fat);
 }
+function addMealTo(label){openMealModal(null,{meal_type:label});}
 async function saveMeal(id){
   let name=el('mName').value.trim();if(!name){toast('Add a name');return;}
   const gEl=el('mGrams');
@@ -2171,7 +2193,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
-  openMealModal,saveMeal,delMeal,scaleMealFromGrams,openGoalsModal,saveGoals,
+  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,openGoalsModal,saveGoals,
   openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
