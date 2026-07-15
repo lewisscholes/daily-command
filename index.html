@@ -1553,16 +1553,30 @@ async function renderFood(v){
       +(days.length?'<div class="section-title">Last 14 days (calories)</div><div class="spark">'+spark+'</div>':'')
     +'</div></div></div></div>';
 }
+let _mealPer100=null;
 async function openMealModal(id,prefill){
   let x={name:'',meal_type:'Breakfast',at_time:'',calories:'',protein:'',carbs:'',fat:''};
+  _mealPer100=null;let grams=null;
   if(id){const {data}=await sb.from('dc_nutrition_meals').select('*').eq('id',id).single();if(data)x=data;}
-  else if(prefill){x=Object.assign(x,prefill);}
+  else if(prefill){
+    if(prefill._per100){
+      _mealPer100=prefill._per100;grams=prefill._grams||100;
+      x.name=prefill.name||'';x.meal_type=prefill.meal_type||'Breakfast';
+      x.calories=Math.round((_mealPer100.calories||0)*grams/100);
+      x.protein=Math.round((_mealPer100.protein||0)*grams/100);
+      x.carbs=Math.round((_mealPer100.carbs||0)*grams/100);
+      x.fat=Math.round((_mealPer100.fat||0)*grams/100);
+    }else{x=Object.assign(x,prefill);}
+  }
   const types=['Breakfast','Lunch','Dinner','Snack'];
   const mt=titleCase(x.meal_type||'Breakfast');const tt=x.at_time?x.at_time.slice(0,5):'';
+  const gramsField=_mealPer100?('<div class="field"><label>Amount you ate (g)</label><input id="mGrams" inputmode="decimal" value="'+grams+'" oninput="scaleMealFromGrams()"></div>'
+    +'<div class="aihint" style="margin:-4px 0 6px">'+svg(I.scan,'')+' Per 100g: '+Math.round(_mealPer100.calories||0)+' kcal &middot; P'+Math.round(_mealPer100.protein||0)+' C'+Math.round(_mealPer100.carbs||0)+' F'+Math.round(_mealPer100.fat||0)+'. Change the grams and the totals below update automatically.</div>'):'';
   el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
     +'<div class="modal-h">'+(id?'Edit meal':'Log meal')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
     +'<div class="modal-b">'
       +'<div class="field"><label>What did you eat?</label><input id="mName" value="'+esc(x.name||'')+'" placeholder="e.g. Chicken and rice"></div>'
+      +gramsField
       +'<div class="inrow"><div class="field grow"><label>Meal</label><select id="mType">'+types.map(c=>'<option'+(mt===c?' selected':'')+'>'+c+'</option>').join('')+'</select></div>'
         +'<div class="field grow"><label>Time (optional)</label><input id="mTime" type="time" value="'+tt+'"></div></div>'
       +'<div class="inrow"><div class="field grow"><label>Calories</label><input id="mCal" inputmode="numeric" value="'+(x.calories!=null?x.calories:'')+'"></div>'
@@ -1573,8 +1587,16 @@ async function openMealModal(id,prefill){
     +'<div class="modal-f">'+(id?'<button class="btn" style="margin-right:auto" onclick="delMeal(\''+id+'\')">Delete</button>':'')+'<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveMeal('+(id?'\''+id+'\'':'null')+')">Save</button></div>'
   +'</div></div>';
 }
+function scaleMealFromGrams(){
+  if(!_mealPer100)return;
+  const g=parseFloat((el('mGrams')||{}).value)||0;
+  const set=(id,v)=>{const e=el(id);if(e)e.value=Math.round((v||0)*g/100);};
+  set('mCal',_mealPer100.calories);set('mPro',_mealPer100.protein);set('mCarb',_mealPer100.carbs);set('mFat',_mealPer100.fat);
+}
 async function saveMeal(id){
-  const name=el('mName').value.trim();if(!name){toast('Add a name');return;}
+  let name=el('mName').value.trim();if(!name){toast('Add a name');return;}
+  const gEl=el('mGrams');
+  if(gEl&&gEl.value&&!/\(\s*[\d.]+\s*g\s*\)/.test(name))name+=' ('+(parseFloat(gEl.value)||0)+'g)';
   const n=v=>{const x=(v||'').trim();return x===''?null:Number(x);};
   const row={name:name,meal_type:el('mType').value.toLowerCase(),at_time:el('mTime').value||null,
     calories:n(el('mCal').value),protein:n(el('mPro').value),carbs:n(el('mCarb').value),fat:n(el('mFat').value)};
@@ -1634,14 +1656,11 @@ async function onScanSuccess(text){
 function normOFF(p,code){
   const n=p.nutriments||{};
   const num=v=>{const x=typeof v==='string'?parseFloat(v):v;return (typeof x==='number'&&isFinite(x))?Math.round(x*10)/10:null;};
-  const hasServing=!!p.serving_size&&n['energy-kcal_serving']!=null;
-  const pick=(sk,hk)=>hasServing?num(n[sk]):num(n[hk]);
-  return {name:(p.product_name||'').trim()||('Product '+code),
-    basis:hasServing?('per '+(p.serving_size||'serving')):'per 100g',
-    calories:pick('energy-kcal_serving','energy-kcal_100g'),
-    protein:pick('proteins_serving','proteins_100g'),
-    carbs:pick('carbohydrates_serving','carbohydrates_100g'),
-    fat:pick('fat_serving','fat_100g')};
+  // per-100g is the always-present basis we scale from
+  const per100={calories:num(n['energy-kcal_100g']),protein:num(n['proteins_100g']),carbs:num(n['carbohydrates_100g']),fat:num(n['fat_100g'])};
+  // sensible default portion: the product's serving size in grams if declared, else 100g
+  let servingG=null;const m=/([\d.]+)\s*g/i.exec(p.serving_size||'');if(m)servingG=Math.round(parseFloat(m[1]));
+  return {name:(p.product_name||'').trim()||('Product '+code),per100:per100,servingGrams:servingG};
 }
 async function lookupBarcode(code){
   toast('Looking up '+code+'...');
@@ -1650,12 +1669,14 @@ async function lookupBarcode(code){
     const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+code+'.json?fields=product_name,brands,serving_size,nutriments');
     if(r.ok){const b=await r.json();if(b&&b.status!==0&&b.product)food=normOFF(b.product,code);}
   }catch(_){/* offline/CORS -> manual fallback */}
-  const brand=food&&food.name?food.name:('Product '+code);
-  if(food&&(food.calories!=null||food.protein!=null||food.carbs!=null||food.fat!=null)){
-    openMealModal(null,{name:food.name,meal_type:mealTypeNow(),calories:food.calories,protein:food.protein,carbs:food.carbs,fat:food.fat});
-    toast('Found: '+food.name+' ('+food.basis+') -- adjust portion if needed');
+  const p100=food&&food.per100;
+  const hasMacros=p100&&(p100.calories!=null||p100.protein!=null||p100.carbs!=null||p100.fat!=null);
+  if(hasMacros){
+    const g=food.servingGrams||100;
+    openMealModal(null,{name:food.name,meal_type:mealTypeNow(),_per100:p100,_grams:g});
+    toast('Found: '+food.name+' -- set the grams you ate');
   }else{
-    openMealModal(null,{name:brand,meal_type:mealTypeNow()});
+    openMealModal(null,{name:(food&&food.name)||('Product '+code),meal_type:mealTypeNow()});
     toast('Not in Open Food Facts -- enter the macros manually');
   }
 }
@@ -2150,7 +2171,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
-  openMealModal,saveMeal,delMeal,openGoalsModal,saveGoals,
+  openMealModal,saveMeal,delMeal,scaleMealFromGrams,openGoalsModal,saveGoals,
   openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
