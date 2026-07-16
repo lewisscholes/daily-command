@@ -1581,7 +1581,12 @@ let _mealPer100=null;
 async function openMealModal(id,prefill){
   let x={name:'',meal_type:'Breakfast',at_time:'',calories:'',protein:'',carbs:'',fat:''};
   _mealPer100=null;let grams=null;
-  if(id){const {data}=await sb.from('dc_nutrition_meals').select('*').eq('id',id).single();if(data)x=data;}
+  if(id){const {data}=await sb.from('dc_nutrition_meals').select('*').eq('id',id).single();if(data){x=data;
+    if(data.cal100!=null||data.pro100!=null||data.carb100!=null||data.fat100!=null){
+      _mealPer100={calories:data.cal100,protein:data.pro100,carbs:data.carb100,fat:data.fat100};
+      grams=(data.grams!=null)?data.grams:100;
+    }
+  }}
   else if(prefill){
     if(prefill._per100){
       _mealPer100=prefill._per100;grams=prefill._grams||100;
@@ -1621,7 +1626,7 @@ function addMealTo(label){openMealModal(null,{meal_type:label});}
 // ---- Saved meals (presets): group a section's items under a name, re-add in one tap ----
 async function saveMealPreset(label){
   const mt=label.toLowerCase();
-  const {data}=await sb.from('dc_nutrition_meals').select('name,calories,protein,carbs,fat,at_time').eq('meal_date',state.date).eq('meal_type',mt);
+  const {data}=await sb.from('dc_nutrition_meals').select('name,calories,protein,carbs,fat,at_time,grams,cal100,pro100,carb100,fat100').eq('meal_date',state.date).eq('meal_type',mt);
   const items=data||[];
   if(!items.length){toast('Nothing in '+label+' to save yet');return;}
   const name=prompt('Save these '+items.length+' item'+(items.length>1?'s':'')+' as a meal called:');
@@ -1651,7 +1656,7 @@ async function addPreset(id){
   if(!data){toast('Saved meal not found');return;}
   const items=data.items||[];
   if(!items.length){toast('This saved meal has no items');return;}
-  const rows=items.map(it=>({meal_date:state.date,meal_type:(data.meal_type||'snack'),name:it.name,calories:it.calories,protein:it.protein,carbs:it.carbs,fat:it.fat,at_time:it.at_time||null}));
+  const rows=items.map(it=>({meal_date:state.date,meal_type:(data.meal_type||'snack'),name:it.name,calories:it.calories,protein:it.protein,carbs:it.carbs,fat:it.fat,at_time:it.at_time||null,grams:it.grams!=null?it.grams:null,cal100:it.cal100!=null?it.cal100:null,pro100:it.pro100!=null?it.pro100:null,carb100:it.carb100!=null?it.carb100:null,fat100:it.fat100!=null?it.fat100:null}));
   await sb.from('dc_nutrition_meals').insert(rows);
   closeModal();toast('Added '+rows.length+' item'+(rows.length>1?'s':'')+' from "'+data.name+'"');navigate('food');
 }
@@ -1659,10 +1664,11 @@ async function delPreset(id){if(!confirm('Delete this saved meal?'))return;await
 async function saveMeal(id){
   let name=el('mName').value.trim();if(!name){toast('Add a name');return;}
   const gEl=el('mGrams');
-  if(gEl&&gEl.value&&!/\(\s*[\d.]+\s*g\s*\)/.test(name))name+=' ('+(parseFloat(gEl.value)||0)+'g)';
+  if(gEl&&gEl.value){name=name.replace(/\s*\(\s*[\d.]+\s*g\s*\)\s*$/i,'').trim()+' ('+(parseFloat(gEl.value)||0)+'g)';}
   const n=v=>{const x=(v||'').trim();return x===''?null:Number(x);};
   const row={name:name,meal_type:el('mType').value.toLowerCase(),at_time:el('mTime').value||null,
     calories:n(el('mCal').value),protein:n(el('mPro').value),carbs:n(el('mCarb').value),fat:n(el('mFat').value)};
+  if(_mealPer100){row.grams=gEl?(parseFloat(gEl.value)||null):null;row.cal100=_mealPer100.calories;row.pro100=_mealPer100.protein;row.carb100=_mealPer100.carbs;row.fat100=_mealPer100.fat;}
   if(id){await sb.from('dc_nutrition_meals').update(row).eq('id',id);}
   else{row.meal_date=state.date;await sb.from('dc_nutrition_meals').insert(row);}
   closeModal();toast('Saved');navigate('food');
