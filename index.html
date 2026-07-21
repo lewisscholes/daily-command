@@ -332,6 +332,12 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .msec-k{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600}
 .msec-add{padding:4px 8px!important}
 .msec-empty{color:var(--muted);font-size:12px;padding:6px 4px 10px}
+.chgrid{display:grid;grid-template-columns:repeat(10,1fr);gap:6px}
+@media(max-width:560px){.chgrid{grid-template-columns:repeat(6,1fr)}}
+.chbox{aspect-ratio:1;border:2px solid var(--line2);border-radius:9px;background:#fff;font-family:inherit;font-weight:800;font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:transform .1s,background .15s}
+.chbox:active{transform:scale(.9)}
+.chbox.on{background:linear-gradient(135deg,#38d39f,#1fae7e);border-color:#1fae7e;color:#fff}
+.chbox svg{width:14px;height:14px}
 .food-actions .btn{flex:1 1 auto}
 .scanbox{width:100%;border-radius:10px;overflow:hidden;background:#000;min-height:220px}
 .scanbox video{width:100%!important;height:auto!important;display:block}
@@ -1498,11 +1504,13 @@ async function askCoach(scope,btn){
 async function renderFood(v){
   const date=state.date;const s=state.settings;
   const past=addDays(date,-29);
-  const [mealsR,histR]=await Promise.all([
+  const [mealsR,histR,chR]=await Promise.all([
     sb.from('dc_nutrition_meals').select('*').eq('meal_date',date).order('at_time',{nullsFirst:true}).order('synced_at'),
-    sb.from('dc_nutrition_meals').select('meal_date,calories,protein,carbs,fat').gte('meal_date',past).lte('meal_date',date)
+    sb.from('dc_nutrition_meals').select('meal_date,calories,protein,carbs,fat').gte('meal_date',past).lte('meal_date',date),
+    sb.from('dc_challenge_days').select('day').eq('done',true)
   ]);
   const meals=mealsR.data||[];const hist=histR.data||[];
+  _challengeDone=new Set((chR.data||[]).map(r=>r.day));
   const sum=k=>meals.reduce((a,b)=>a+(Number(b[k])||0),0);
   const cal=sum('calories'),pro=sum('protein'),carb=sum('carbs'),fat=sum('fat');
   const calGoal=Number(s.cal_target)||2200,proGoal=Number(s.protein_target)||160,carbGoal=Number(s.carbs_target)||220,fatGoal=Number(s.fat_target)||70;
@@ -1575,9 +1583,35 @@ async function renderFood(v){
         +'<div class="stat"><div class="n">'+days.filter(d=>Math.abs(byDay[d].cal-calGoal)<=calGoal*0.1).length+'</div><div class="l">Days on goal</div></div>'
       +'</div>'
       +(days.length?'<div class="section-title">Last 14 days (calories)</div><div class="spark">'+spark+'</div>':'')
-    +'</div></div></div></div>';
+    +'</div></div></div></div>'
+    +challengeCard();
+}
+function challengeCard(){
+  const done=_challengeDone.size;const pct=Math.round(done/90*100);
+  let cells='';
+  for(let d=1;d<=90;d++){const on=_challengeDone.has(d);
+    cells+='<button class="chbox'+(on?' on':'')+'" data-day="'+d+'" onclick="toggleChallengeDay('+d+')">'+(on?svg(I.check):d)+'</button>';}
+  return '<div class="card" style="margin-top:18px"><div class="card-h">'+svg(I.flag,'ic')+'<h2>90-Day Challenge</h2><span class="count" id="chCount">'+done+' / 90</span></div>'
+    +'<div class="card-b" style="padding:16px">'
+      +'<div class="pbar'+(done>=90?' done':'')+'"><i id="chFill" style="width:'+pct+'%"></i></div>'
+      +'<div style="font-size:12px;color:var(--muted);margin:8px 2px 14px" id="chNote">'+chNote(done)+'</div>'
+      +'<div class="chgrid">'+cells+'</div>'
+    +'</div></div>';
+}
+function chNote(done){return done>=90?'Done! 90 days smashed -- incredible discipline.':(done+' days in, '+(90-done)+' to go. Tick a box each day you stay on the diet + gym.');}
+async function toggleChallengeDay(day){
+  const nowOn=!_challengeDone.has(day);
+  if(nowOn)_challengeDone.add(day);else _challengeDone.delete(day);
+  const btn=document.querySelector('.chbox[data-day="'+day+'"]');
+  if(btn){btn.classList.toggle('on',nowOn);btn.innerHTML=nowOn?svg(I.check):day;}
+  const done=_challengeDone.size;
+  const cnt=el('chCount');if(cnt)cnt.textContent=done+' / 90';
+  const fill=el('chFill');if(fill)fill.style.width=Math.round(done/90*100)+'%';
+  const note=el('chNote');if(note)note.textContent=chNote(done);
+  await sb.from('dc_challenge_days').upsert({day:day,done:nowOn,done_at:nowOn?new Date().toISOString():null},{onConflict:'day'});
 }
 let _mealPer100=null;
+let _challengeDone=new Set();
 async function openMealModal(id,prefill){
   let x={name:'',meal_type:'Breakfast',at_time:'',calories:'',protein:'',carbs:'',fat:''};
   _mealPer100=null;let grams=null;
@@ -2240,7 +2274,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
-  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,openGoalsModal,saveGoals,
+  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,toggleChallengeDay,openGoalsModal,saveGoals,
   openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
