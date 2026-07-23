@@ -344,6 +344,12 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink)}
 .aihint{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:10px;line-height:1.4}
 .aihint svg{flex:none}
 .aiprev{max-width:100%;max-height:180px;border-radius:10px;margin-bottom:10px;display:block}
+.trrange{display:flex;gap:10px;margin-bottom:10px}
+.trrange .grow{flex:1;min-width:0}
+.trrange label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px}
+.trrange input{width:100%;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font-size:14px;font-family:inherit;background:#fff;color:var(--ink)}
+.trquick{display:flex;gap:6px;margin-bottom:14px}
+.trquick .btn{flex:1}
 .spark{display:flex;align-items:flex-end;gap:5px;height:44px;padding:6px 2px 0}
 .sparkcol{flex:1;display:flex;align-items:flex-end;justify-content:center}
 .sparkcol>i{width:100%;max-width:16px;border-radius:3px 3px 0 0;background:linear-gradient(180deg,#9b6dff,#635bff)}
@@ -1503,14 +1509,13 @@ async function askCoach(scope,btn){
 // Read-only Food tracker: mirrors data synced from the nutrition tracker connector.
 async function renderFood(v){
   const date=state.date;const s=state.settings;
-  const past=addDays(date,-29);
-  const [mealsR,histR,chR]=await Promise.all([
+  const [mealsR,chR]=await Promise.all([
     sb.from('dc_nutrition_meals').select('*').eq('meal_date',date).order('at_time',{nullsFirst:true}).order('synced_at'),
-    sb.from('dc_nutrition_meals').select('meal_date,calories,protein,carbs,fat').gte('meal_date',past).lte('meal_date',date),
     sb.from('dc_challenge_days').select('day').eq('done',true)
   ]);
-  const meals=mealsR.data||[];const hist=histR.data||[];
+  const meals=mealsR.data||[];
   _challengeDone=new Set((chR.data||[]).map(r=>r.day));
+  if(!_trendsFrom||!_trendsTo){_trendsTo=date;_trendsFrom=addDays(date,-29);}
   const sum=k=>meals.reduce((a,b)=>a+(Number(b[k])||0),0);
   const cal=sum('calories'),pro=sum('protein'),carb=sum('carbs'),fat=sum('fat');
   const calGoal=Number(s.cal_target)||2200,proGoal=Number(s.protein_target)||160,carbGoal=Number(s.carbs_target)||220,fatGoal=Number(s.fat_target)||70;
@@ -1543,16 +1548,6 @@ async function renderFood(v){
     +'</div>';
   }
   const mealList=MT.map(t=>msection(t[0],t[1])).join('');
-  // trends: aggregate calories per day over the window
-  const byDay={};hist.forEach(r=>{const d=r.meal_date;if(!byDay[d])byDay[d]={cal:0,pro:0};byDay[d].cal+=Number(r.calories)||0;byDay[d].pro+=Number(r.protein)||0;});
-  const days=Object.keys(byDay).sort();
-  const avg=(n)=>{const ds=days.filter(d=>d>addDays(date,-n));if(!ds.length)return null;return Math.round(ds.reduce((a,d)=>a+byDay[d].cal,0)/ds.length);};
-  const avg7=avg(7),avg30=avg(30);
-  const proAvg7=(()=>{const ds=days.filter(d=>d>addDays(date,-7));if(!ds.length)return null;return Math.round(ds.reduce((a,d)=>a+byDay[d].pro,0)/ds.length);})();
-  // logging streak ending today (consecutive days with >=1 meal up to selected date)
-  let streak=0;for(let i=0,d=date;i<60;i++,d=addDays(d,-1)){if(byDay[d])streak++;else break;}
-  const loggedDays=days.length;
-  const spark=days.slice(-14).map(d=>{const h=Math.max(4,Math.min(38,Math.round((byDay[d].cal/(calGoal||2200))*30)));const hit=Math.abs(byDay[d].cal-calGoal)<=calGoal*0.1;return '<div class="sparkcol" title="'+shortDate(d)+': '+Math.round(byDay[d].cal)+' kcal"><i class="'+(hit?'hit':'')+'" style="height:'+h+'px"></i></div>';}).join('');
   v.innerHTML='<div class="food-wrap">'
     +'<div class="card"><div class="card-h">'+svg(I.target,'ic')+'<h2>'+(isToday(date)?'Today':shortDate(date))+' vs goals</h2>'
       +'<button class="btn ghost sm" style="margin-left:auto" title="Edit goals" onclick="openGoalsModal()">'+svg(I.pencil,'')+' Goals</button></div>'
@@ -1571,20 +1566,58 @@ async function renderFood(v){
         +'<button class="btn sm" onclick="openPresetPicker()">'+svg(I.save,'')+' Saved meals</button>'
       +'</div>'
       +mealList+'</div></div>'
-    +'<div class="card"><div class="card-h">'+svg(I.dash,'ic')+'<h2>Trends &amp; history</h2><span class="count">last 30d</span></div><div class="card-b" style="padding:16px">'
-      +'<div class="grid cols-3" style="gap:0">'
-        +'<div class="stat"><div class="n">'+(avg7!=null?avg7:'--')+'</div><div class="l">Avg kcal / 7d</div></div>'
-        +'<div class="stat"><div class="n">'+(avg30!=null?avg30:'--')+'</div><div class="l">Avg kcal / 30d</div></div>'
-        +'<div class="stat"><div class="n">'+(proAvg7!=null?proAvg7+'g':'--')+'</div><div class="l">Avg protein / 7d</div></div>'
+    +'<div class="card"><div class="card-h">'+svg(I.dash,'ic')+'<h2>Trends &amp; history</h2></div><div class="card-b" style="padding:16px">'
+      +'<div class="trrange">'
+        +'<div class="grow"><label>From</label><input id="trFrom" type="date" value="'+_trendsFrom+'" onchange="setTrendsRange()"></div>'
+        +'<div class="grow"><label>To</label><input id="trTo" type="date" value="'+_trendsTo+'" onchange="setTrendsRange()"></div>'
       +'</div>'
-      +'<div class="grid cols-3" style="gap:0;margin-top:4px">'
-        +'<div class="stat"><div class="n">'+streak+'</div><div class="l">Day logging streak</div></div>'
-        +'<div class="stat"><div class="n">'+loggedDays+'</div><div class="l">Days logged / 30</div></div>'
-        +'<div class="stat"><div class="n">'+days.filter(d=>Math.abs(byDay[d].cal-calGoal)<=calGoal*0.1).length+'</div><div class="l">Days on goal</div></div>'
+      +'<div class="trquick">'
+        +'<button class="btn ghost sm" onclick="setTrendsPreset(7)">7d</button>'
+        +'<button class="btn ghost sm" onclick="setTrendsPreset(30)">30d</button>'
+        +'<button class="btn ghost sm" onclick="setTrendsPreset(90)">90d</button>'
       +'</div>'
-      +(days.length?'<div class="section-title">Last 14 days (calories)</div><div class="spark">'+spark+'</div>':'')
+      +'<div id="trendsBody"></div>'
     +'</div></div></div></div>'
     +challengeCard();
+  renderTrends();
+}
+async function renderTrends(){
+  const body=el('trendsBody');if(!body)return;
+  const from=_trendsFrom,to=_trendsTo;
+  const {data}=await sb.from('dc_nutrition_meals').select('meal_date,calories,protein').gte('meal_date',from).lte('meal_date',to);
+  const rows=data||[];
+  const byDay={};rows.forEach(r=>{const d=r.meal_date;if(!byDay[d])byDay[d]={cal:0,pro:0};byDay[d].cal+=Number(r.calories)||0;byDay[d].pro+=Number(r.protein)||0;});
+  const days=Object.keys(byDay).sort();const n=days.length;
+  const calGoal=Number(state.settings.cal_target)||2200;
+  const totalCal=days.reduce((a,d)=>a+byDay[d].cal,0);
+  const avgCal=n?Math.round(totalCal/n):null;
+  const avgPro=n?Math.round(days.reduce((a,d)=>a+byDay[d].pro,0)/n):null;
+  const onGoal=days.filter(d=>Math.abs(byDay[d].cal-calGoal)<=calGoal*0.1).length;
+  const span=Math.round((parseDate(to)-parseDate(from))/86400000)+1;
+  const showDays=days.slice(-21);
+  const spark=showDays.map(d=>{const h=Math.max(4,Math.min(38,Math.round((byDay[d].cal/(calGoal||2200))*30)));const hit=Math.abs(byDay[d].cal-calGoal)<=calGoal*0.1;return '<div class="sparkcol" title="'+shortDate(d)+': '+Math.round(byDay[d].cal)+' kcal"><i class="'+(hit?'hit':'')+'" style="height:'+h+'px"></i></div>';}).join('');
+  body.innerHTML='<div class="grid cols-3" style="gap:0">'
+      +'<div class="stat"><div class="n">'+(avgCal!=null?avgCal:'--')+'</div><div class="l">Avg kcal / day</div></div>'
+      +'<div class="stat"><div class="n">'+(avgPro!=null?avgPro+'g':'--')+'</div><div class="l">Avg protein / day</div></div>'
+      +'<div class="stat"><div class="n">'+n+'</div><div class="l">Days logged</div></div>'
+    +'</div>'
+    +'<div class="grid cols-3" style="gap:0;margin-top:4px">'
+      +'<div class="stat"><div class="n">'+onGoal+'</div><div class="l">Days on goal</div></div>'
+      +'<div class="stat"><div class="n">'+span+'</div><div class="l">Days in range</div></div>'
+      +'<div class="stat"><div class="n">'+Math.round(totalCal/1000)+'k</div><div class="l">Total kcal</div></div>'
+    +'</div>'
+    +(n?'<div class="section-title">Daily calories'+(showDays.length<days.length?' (last 21 logged)':'')+'</div><div class="spark">'+spark+'</div>':'<div class="empty">No meals logged in this range.</div>');
+}
+function setTrendsRange(){
+  const f=el('trFrom'),t=el('trTo');if(!f||!t)return;
+  let from=f.value||_trendsFrom,to=t.value||_trendsTo;
+  if(from>to){const tmp=from;from=to;to=tmp;f.value=from;t.value=to;}
+  _trendsFrom=from;_trendsTo=to;renderTrends();
+}
+function setTrendsPreset(nDays){
+  _trendsTo=state.date;_trendsFrom=addDays(state.date,-(nDays-1));
+  const f=el('trFrom'),t=el('trTo');if(f)f.value=_trendsFrom;if(t)t.value=_trendsTo;
+  renderTrends();
 }
 function challengeCard(){
   const done=_challengeDone.size;const pct=Math.round(done/90*100);
@@ -1612,6 +1645,7 @@ async function toggleChallengeDay(day){
 }
 let _mealPer100=null;
 let _challengeDone=new Set();
+let _trendsFrom=null,_trendsTo=null;
 async function openMealModal(id,prefill){
   let x={name:'',meal_type:'Breakfast',at_time:'',calories:'',protein:'',carbs:'',fat:''};
   _mealPer100=null;let grams=null;
@@ -2274,7 +2308,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
-  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,toggleChallengeDay,openGoalsModal,saveGoals,
+  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,toggleChallengeDay,setTrendsRange,setTrendsPreset,openGoalsModal,saveGoals,
   openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
