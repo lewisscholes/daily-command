@@ -1529,7 +1529,8 @@ async function renderFood(v){
       +'<span>'+Math.round(Number(x.calories)||0)+' kcal</span>'
       +'<span>P'+Math.round(Number(x.protein)||0)+' C'+Math.round(Number(x.carbs)||0)+' F'+Math.round(Number(x.fat)||0)+'</span>'
     +'</div></div>'
-    +'<div class="row-acts" style="opacity:1"><button class="btn ghost sm" title="Edit" onclick="openMealModal(\''+x.id+'\')">'+svg(I.pencil,'')+'</button>'
+    +'<div class="row-acts" style="opacity:1"><button class="btn ghost sm" title="Save to my foods" onclick="saveFoodFromMeal(\''+x.id+'\')">'+svg(I.save,'')+'</button>'
+    +'<button class="btn ghost sm" title="Edit" onclick="openMealModal(\''+x.id+'\')">'+svg(I.pencil,'')+'</button>'
     +'<button class="btn ghost sm" title="Delete" onclick="delMeal(\''+x.id+'\')">'+svg(I.trash,'')+'</button></div>'
     +'</div>';}
   function msection(key,label){
@@ -1789,6 +1790,21 @@ async function saveFood(id){
   toast('Saved');openFoodLibrary();
 }
 async function delFood(id){if(!confirm('Delete this food?'))return;await sb.from('dc_foods').delete().eq('id',id);openFoodLibrary();}
+async function saveFoodFromMeal(id){
+  const {data}=await sb.from('dc_nutrition_meals').select('*').eq('id',id).single();
+  if(!data){toast('Item not found');return;}
+  const name=(data.name||'Food').replace(/\s*\(\s*[\d.]+\s*g\s*\)\s*$/i,'').trim();
+  let food;
+  if(data.cal100!=null||data.pro100!=null||data.carb100!=null||data.fat100!=null){
+    // scanned/scaled item -- keep its true per-100g basis + the portion as default
+    food={name:name,cal100:data.cal100,pro100:data.pro100,carb100:data.carb100,fat100:data.fat100,default_grams:data.grams!=null?data.grams:100};
+  }else{
+    // no per-100g (typed / AI) -- store the logged amount as a 1-portion (100) reference
+    food={name:name,cal100:data.calories,pro100:data.protein,carb100:data.carbs,fat100:data.fat,default_grams:100};
+  }
+  await sb.from('dc_foods').insert(food);
+  toast('Saved "'+name+'" to your foods');
+}
 async function saveMeal(id){
   let name=el('mName').value.trim();if(!name){toast('Add a name');return;}
   const gEl=el('mGrams');
@@ -2368,7 +2384,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
-  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,saveModalFood,openFoodLibrary,addSavedFood,openFoodForm,saveFood,delFood,toggleChallengeDay,setTrendsRange,setTrendsPreset,openGoalsModal,saveGoals,
+  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,saveModalFood,openFoodLibrary,addSavedFood,openFoodForm,saveFood,delFood,saveFoodFromMeal,toggleChallengeDay,setTrendsRange,setTrendsPreset,openGoalsModal,saveGoals,
   openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
