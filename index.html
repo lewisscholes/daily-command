@@ -1563,6 +1563,7 @@ async function renderFood(v){
         +'<button class="btn sm" onclick="openAiMealModal(\'photo\')">'+svg(I.cam,'')+' Snap meal</button>'
         +'<button class="btn sm" onclick="openAiMealModal(\'text\')">'+svg(I.spark,'')+' Describe</button>'
         +'<button class="btn sm" onclick="openMealModal()">'+svg(I.plus,'')+' Manual</button>'
+        +'<button class="btn sm" onclick="openFoodLibrary()">'+svg(I.food,'')+' Saved foods</button>'
         +'<button class="btn sm" onclick="openPresetPicker()">'+svg(I.save,'')+' Saved meals</button>'
       +'</div>'
       +mealList+'</div></div>'
@@ -1680,6 +1681,7 @@ async function openMealModal(id,prefill){
         +'<div class="field grow"><label>Protein (g)</label><input id="mPro" inputmode="numeric" value="'+(x.protein!=null?x.protein:'')+'"></div></div>'
       +'<div class="inrow"><div class="field grow"><label>Carbs (g)</label><input id="mCarb" inputmode="numeric" value="'+(x.carbs!=null?x.carbs:'')+'"></div>'
         +'<div class="field grow"><label>Fat (g)</label><input id="mFat" inputmode="numeric" value="'+(x.fat!=null?x.fat:'')+'"></div></div>'
+      +(_mealPer100?'<button class="btn full" style="margin-top:10px" onclick="saveModalFood()">'+svg(I.save,'')+' Save to my foods</button>':'')
     +'</div>'
     +'<div class="modal-f">'+(id?'<button class="btn" style="margin-right:auto" onclick="delMeal(\''+id+'\')">Delete</button>':'')+'<button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveMeal('+(id?'\''+id+'\'':'null')+')">Save</button></div>'
   +'</div></div>';
@@ -1729,6 +1731,64 @@ async function addPreset(id){
   closeModal();toast('Added '+rows.length+' item'+(rows.length>1?'s':'')+' from "'+data.name+'"');navigate('food');
 }
 async function delPreset(id){if(!confirm('Delete this saved meal?'))return;await sb.from('dc_meal_presets').delete().eq('id',id);openPresetPicker();}
+// ---- Saved foods (personal food library): individual items with per-100g macros ----
+async function saveModalFood(){
+  if(!_mealPer100){toast('Only scanned/scaled foods can be saved here');return;}
+  let name=(el('mName').value||'').trim().replace(/\s*\(\s*[\d.]+\s*g\s*\)\s*$/i,'');
+  if(!name){toast('Add a name first');return;}
+  const g=el('mGrams');const dg=g?(parseFloat(g.value)||null):null;
+  await sb.from('dc_foods').insert({name:name,cal100:_mealPer100.calories,pro100:_mealPer100.protein,carb100:_mealPer100.carbs,fat100:_mealPer100.fat,default_grams:dg});
+  toast('Saved "'+name+'" to your foods');
+}
+async function openFoodLibrary(){
+  const {data}=await sb.from('dc_foods').select('*').order('name');
+  const foods=data||[];
+  const rows=foods.length?foods.map(f=>{
+    const per='per 100g: '+Math.round(Number(f.cal100)||0)+' kcal &middot; P'+Math.round(Number(f.pro100)||0)+' C'+Math.round(Number(f.carb100)||0)+' F'+Math.round(Number(f.fat100)||0);
+    return '<div class="tbox"><div class="rt"><div class="t">'+esc(f.name)+'</div><div class="m"><span>'+per+'</span>'+(f.default_grams!=null?'<span>usual '+Math.round(Number(f.default_grams))+'g</span>':'')+'</div></div>'
+      +'<div class="row-acts" style="opacity:1"><button class="btn primary sm" title="Add to today" onclick="addSavedFood(\''+f.id+'\')">'+svg(I.plus,'')+' Add</button>'
+      +'<button class="btn ghost sm" title="Edit" onclick="openFoodForm(\''+f.id+'\')">'+svg(I.pencil,'')+'</button>'
+      +'<button class="btn ghost sm" title="Delete" onclick="delFood(\''+f.id+'\')">'+svg(I.trash,'')+'</button></div></div>';
+  }).join(''):'<div class="empty">No saved foods yet. Add one below, or when you scan an item tap "Save to my foods".</div>';
+  el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
+    +'<div class="modal-h">Saved foods<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b">'+rows+'</div>'
+    +'<div class="modal-f"><button class="btn" onclick="closeModal()">Close</button><button class="btn primary" onclick="openFoodForm()">'+svg(I.plus,'')+' Add a food</button></div>'
+  +'</div></div>';
+}
+async function addSavedFood(id){
+  const {data}=await sb.from('dc_foods').select('*').eq('id',id).single();
+  if(!data){toast('Food not found');return;}
+  const per100={calories:Number(data.cal100)||0,protein:Number(data.pro100)||0,carbs:Number(data.carb100)||0,fat:Number(data.fat100)||0};
+  const g=data.default_grams!=null?Number(data.default_grams):100;
+  openMealModal(null,{name:data.name,meal_type:mealTypeNow(),_per100:per100,_grams:g});
+}
+async function openFoodForm(id){
+  let x={name:'',cal100:'',pro100:'',carb100:'',fat100:'',default_grams:''};
+  if(id){const {data}=await sb.from('dc_foods').select('*').eq('id',id).single();if(data)x=data;}
+  el('modalRoot').innerHTML='<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">'
+    +'<div class="modal-h">'+(id?'Edit food':'New food')+'<button class="btn ghost sm x" onclick="closeModal()">'+svg(I.x,'')+'</button></div>'
+    +'<div class="modal-b">'
+      +'<div class="field"><label>Food name</label><input id="fdName" value="'+esc(x.name||'')+'" placeholder="e.g. Organic porridge oats"></div>'
+      +'<div class="aihint" style="margin:-2px 0 8px">'+svg(I.scan,'')+' Enter the values per 100g (from the packet). When you add it, you set the exact grams and it scales.</div>'
+      +'<div class="inrow"><div class="field grow"><label>Calories /100g</label><input id="fdCal" inputmode="numeric" value="'+(x.cal100!=null?x.cal100:'')+'"></div>'
+        +'<div class="field grow"><label>Protein /100g</label><input id="fdPro" inputmode="numeric" value="'+(x.pro100!=null?x.pro100:'')+'"></div></div>'
+      +'<div class="inrow"><div class="field grow"><label>Carbs /100g</label><input id="fdCarb" inputmode="numeric" value="'+(x.carb100!=null?x.carb100:'')+'"></div>'
+        +'<div class="field grow"><label>Fat /100g</label><input id="fdFat" inputmode="numeric" value="'+(x.fat100!=null?x.fat100:'')+'"></div></div>'
+      +'<div class="field"><label>Usual portion (g, optional)</label><input id="fdGrams" inputmode="decimal" value="'+(x.default_grams!=null?x.default_grams:'')+'"></div>'
+    +'</div>'
+    +'<div class="modal-f">'+(id?'<button class="btn" style="margin-right:auto" onclick="delFood(\''+id+'\')">Delete</button>':'')+'<button class="btn" onclick="openFoodLibrary()">Back</button><button class="btn primary" onclick="saveFood('+(id?'\''+id+'\'':'null')+')">Save</button></div>'
+  +'</div></div>';
+}
+async function saveFood(id){
+  const name=(el('fdName').value||'').trim();if(!name){toast('Add a name');return;}
+  const n=v=>{const y=(v||'').trim();return y===''?null:Number(y);};
+  const row={name:name,cal100:n(el('fdCal').value),pro100:n(el('fdPro').value),carb100:n(el('fdCarb').value),fat100:n(el('fdFat').value),default_grams:n(el('fdGrams').value)};
+  if(id)await sb.from('dc_foods').update(row).eq('id',id);
+  else await sb.from('dc_foods').insert(row);
+  toast('Saved');openFoodLibrary();
+}
+async function delFood(id){if(!confirm('Delete this food?'))return;await sb.from('dc_foods').delete().eq('id',id);openFoodLibrary();}
 async function saveMeal(id){
   let name=el('mName').value.trim();if(!name){toast('Add a name');return;}
   const gEl=el('mGrams');
@@ -2308,7 +2368,7 @@ Object.assign(window,{navigate,shiftDay,goToday,toggleTask,moveTask,deleteTask,a
   toggleMission,moveMission,deleteMission,addGoal,toggleGoal,delRow,uploadVision,addVisionText,delVision,dismissNudge,toggleWide,addBlock,delBlock,autoSchedule,
   createTemplate,editTemplate,closeEditor,addTemplateExercise,deleteTemplateExercise,deleteTemplate,setTemplateWeekday,deleteSession,
   startWorkout,logSet,setRest,startRest,finishWorkout,discardWorkout,askCoach,
-  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,toggleChallengeDay,setTrendsRange,setTrendsPreset,openGoalsModal,saveGoals,
+  openMealModal,saveMeal,delMeal,scaleMealFromGrams,addMealTo,saveMealPreset,openPresetPicker,addPreset,delPreset,saveModalFood,openFoodLibrary,addSavedFood,openFoodForm,saveFood,delFood,toggleChallengeDay,setTrendsRange,setTrendsPreset,openGoalsModal,saveGoals,
   openScanModal,closeScan,openAiMealModal,aiPhotoPicked,aiLogMeal,
   addWeight,delWeight,viewPhoto,weightPhotoPicked,
   setCalFilter,openEventModal,closeModal,saveEvent,delEvent,openTodoModal,saveTodo,toggleTodo,delTodo,
